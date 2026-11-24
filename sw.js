@@ -1,5 +1,5 @@
 // Offline cache. Each release bumps VERSION here and in js/config.js; install checks both match.
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const CACHE = 'lean-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
