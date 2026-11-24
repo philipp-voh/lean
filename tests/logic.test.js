@@ -2,6 +2,7 @@
 import * as L from '../js/logic.js';
 import { build, check } from '../js/backup.js';
 import { VERSION } from '../js/config.js';
+import { firstTime, pinto } from '../js/ui.js';
 
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
@@ -320,6 +321,162 @@ test('Morning summary: S1 when yesterday has nothing, under half the limit, or n
   eq(L.morning({ ...base, meals: [], days: [{ day: '2026-11-22', mark: 'light', asked: true }] }).yesterday.asked, true);
 });
 
+/* ---------- Pinto ---------- */
+
+// One character per day from 1 Nov: L lean (150 g, under the full goal), P protein at the goal (160 g), S steady,
+// X over the limit, H over the limit with protein at the goal, U a Lean day of 1,000 kcal (under both floors),
+// W a Lean day of 1,300 kcal (under the men's floor, over the women's), N 160 g but marked Not tracked, - nothing.
+function scene(pattern) {
+  const meals = [], days = [];
+  const KP = { L: [2000, 150], P: [2000, 160], S: [2000, 100], X: [2500, 150], H: [2500, 170], U: [1000, 150], W: [1300, 150], N: [2000, 160] };
+  [...pattern].forEach((c, i) => {
+    const d = L.addDays('2026-11-01', i);
+    if (KP[c]) meals.push(quick(d, ...KP[c]));
+    if (c === 'N') days.push({ day: d, mark: 'not-tracked', asked: true });
+  });
+  return { meals, days, goals: GOALS, firstDay: '2026-11-01' };
+}
+const dayAfter = pattern => L.addDays('2026-11-01', pattern.length);
+
+test('Pinto milestones: the highest of 7, 30, 100 and 365 that a save reaches', () => {
+  eq([L.milestone(6, 7), L.milestone(5, 8), L.milestone(7, 8), L.milestone(29, 31), L.milestone(1, 101), L.milestone(364, 365), L.milestone(0, 1)],
+    [7, 7, null, 30, 100, 365, null]);
+});
+test('Pinto protein run: days at the full goal up to today; a Missed day, a day under it or without a goal ends it', () => {
+  const r = (pattern, today = L.addDays('2026-11-01', pattern.length - 1)) => L.proteinRun({ ...scene(pattern), today });
+  eq([r('PPP'), r('PLPP'), r('PP-P'), r('PPNP'), r('HHP'), r('PP', '2026-11-03')], [3, 2, 1, 1, 3, 0]);
+  // Each day uses its own goal; a day before the first goal record ends the run.
+  const s = scene('PPP'), late = [{ ...GOALS[0], from: '2026-11-02' }];
+  eq(L.proteinRun({ ...s, goals: late, today: '2026-11-03' }), 2);
+  eq(L.proteinRun({ ...s, goals: [...GOALS, { from: '2026-11-03', kcal: 2100, protein: 170, mode: 'typed', basis: null }], today: '2026-11-03' }), 0);
+});
+test('Pinto limit run: Lean or Steady days up to yesterday, none under the calorie floor', () => {
+  const r = (pattern, floor = 1500) => L.limitRun({ ...scene(pattern), today: dayAfter(pattern), floor });
+  eq([r('LSL'), r('LXSL'), r('LUL'), r('L-L'), r('LNL'), r('')], [3, 2, 1, 1, 1, 0]);
+  eq([r('LWL'), r('LWL', 1200)], [1, 3]);
+  // 1,499.6 kcal rounds to the floor, as the morning's own check does.
+  const s = scene('LL');
+  eq(L.limitRun({ ...s, meals: [...s.meals, quick('2026-11-03', 1499.6, 150)], today: '2026-11-04', floor: 1500 }), 3);
+});
+test('Pinto weight news: a new low needs an earlier weigh-in to beat, to 0.1 kg', () => {
+  const w = (...pairs) => pairs.map(([day, kg]) => ({ day, kg }));
+  const today = '2026-11-25';
+  eq(L.trendNews([], today), null);
+  eq(L.trendNews(w(['2026-11-24', 80]), today), null);   // the first weigh-in has nothing to beat
+  eq(L.trendNews(w(['2026-11-20', 80], ['2026-11-24', 79]), today), 'New low on your trend.');   // 79.77 beats 80.0
+  eq(L.trendNews(w(['2026-11-20', 80], ['2026-11-24', 80]), today), null);
+  eq(L.trendNews(w(['2026-11-20', 80], ['2026-11-21', 79.6]), today), null);   // 79.96 is still 80.0
+});
+test('Pinto weight news: the trend down this week, as Progress\'s Week chart counts it', () => {
+  // A low first weigh-in, then the trend rises and falls again: not a new low.
+  const w = [['2026-10-20', 79], ['2026-11-10', 84], ['2026-11-18', 84], ['2026-11-24', 80]].map(([day, kg]) => ({ day, kg }));
+  const t = L.trend(w), wk = t.filter(p => p.day >= '2026-11-18');
+  ok(t.at(-1).trend > t[0].trend, 'not a new low');
+  const down = Math.round((wk[0].trend - t.at(-1).trend) * 10) / 10;
+  ok(down >= 0.2, `down ${down}`);
+  eq(L.trendNews(w, '2026-11-25'), `Trend down ${down.toFixed(1)} kg this week.`);
+  // At the edge: a fall of 0.148 kg is no news, 0.178 kg reads as 0.2 kg.
+  const flat = [{ day: '2026-09-01', kg: 80 }];
+  for (let d = '2026-09-04'; d <= '2026-11-18'; d = L.addDays(d, 3)) flat.push({ day: d, kg: 81 });
+  eq([80.5, 80.4].map(kg => L.trendNews([...flat, { day: '2026-11-24', kg }], '2026-11-25')), [null, 'Trend down 0.2 kg this week.']);
+  // A rising trend, or one weigh-in this week, is no news.
+  eq(L.trendNews(w.slice(0, 3).concat({ day: '2026-11-24', kg: 84 }), '2026-11-25'), null);
+  eq(L.trendNews(w.filter(x => x.day !== '2026-11-18'), '2026-11-25'), null);
+});
+test('Pinto weight news: only with a weigh-in in the last 7 days, at most once every 7 days', () => {
+  const w = [{ day: '2026-11-17', kg: 80 }, { day: '2026-11-18', kg: 78 }];
+  eq(L.trendNews(w, '2026-11-25'), 'New low on your trend.');
+  eq(L.trendNews(w, '2026-11-26'), null);   // the last weigh-in is 8 days old
+  eq([L.trendNews(w, '2026-11-25', '2026-11-19'), L.trendNews(w, '2026-11-25', '2026-11-18'), L.trendNews(w, '2026-11-25', '2026-11-25')],
+    [null, 'New low on your trend.', 'New low on your trend.']);   // 6 days after a line: wait; 7 days: news; the same day: kept
+});
+test('Pinto in the morning: still and silent on S1; the pose follows yesterday', () => {
+  const p = o => L.morningPinto({ ask: false, type: 'lean', kcal: 2000, count: 3, floor: 1500, run: 1, news: null, ...o });
+  eq(p({ ask: true, type: 'miss', count: 0, news: 'New low on your trend.' }), { pose: 'rest', line: null, still: true, trend: false });
+  eq(p({ ask: true, type: 'steady', run: 3 }), { pose: 'hello', line: null, still: true, trend: false });
+  eq([p({}).pose, p({ kcal: 1499.4 }).pose, p({ kcal: 1499.6 }).pose, p({ type: 'steady' }).pose, p({ type: 'logged' }).pose, p({ type: 'miss', count: 0 }).pose],
+    ['lean', 'hello', 'lean', 'hello', 'big', 'rest']);
+  eq([p({ kcal: 1300 }).pose, p({ kcal: 1300, floor: 1200 }).pose], ['hello', 'lean']);   // the women's floor is 1,200
+});
+test('Pinto in the morning: a line only after a day within the limit and the floor; the limit line wins', () => {
+  const p = o => L.morningPinto({ ask: false, type: 'lean', kcal: 2000, count: 3, floor: 1500, run: 1, news: null, ...o });
+  eq([p({ run: 3 }).line, p({ run: 4 }).line, p({ run: 7, type: 'steady' }).line, p({ run: 8 }).line, p({}).line],
+    ['3 days within your limit.', null, 'A week within your limit.', null, null]);
+  const news = 'Trend down 0.4 kg this week.';
+  eq(p({ news }), { pose: 'lean', line: news, still: false, trend: true });
+  eq(p({ run: 3, news }), { pose: 'lean', line: '3 days within your limit.', still: false, trend: false });
+  eq([p({ news, kcal: 1100 }).line, p({ news, type: 'logged' }).line, p({ news, type: 'miss', count: 0 }).line], [null, null, null]);
+});
+test('Pinto in the toast: a milestone first, then protein reaching the goal, then the first meal of today', () => {
+  const save = (pattern, meal, extra = []) => {
+    const s = scene(pattern), before = [...s.meals, ...extra];
+    return L.mealPinto({ ...s, before, after: [...before, meal], today: dayAfter(pattern), day: meal.day });
+  };
+  const today = p => dayAfter(p);
+  // The first meal of 7 Nov makes 7 days in a row, whatever its protein.
+  eq(save('LLLLLL', quick(today('LLLLLL'), 900, 170, '08:00')), { pose: 'proud', line: 'One week in a row!' });
+  // Protein from 100 to 170 g of 160: the run decides the biceps.
+  const second = p => [quick(today(p), 500, 100, '08:00', 'Breakfast')];
+  eq(save('L', quick(today('L'), 600, 70), second('L')), { pose: 'strong1', line: 'Protein goal met.' });
+  eq(save('PP', quick(today('PP'), 600, 70), second('PP')), { pose: 'strong2', line: 'Protein: 3 days in a row.' });
+  eq(save('PPPPPPP', quick(today('PPPPPPP'), 600, 70), second('PPPPPPP')), { pose: 'strong3', line: 'Protein: 8 days in a row.' });
+  // Already over the goal, or still under it: no Pinto after the first meal.
+  eq(save('L', quick(today('L'), 600, 10), [quick(today('L'), 500, 170, '08:00', 'Breakfast')]), null);
+  eq(save('L', quick(today('L'), 600, 10), second('L')), null);
+  // The first meal of today: hello. A first meal that reaches the goal is a protein save, even after empty days.
+  eq(save('LS', quick(today('LS'), 400, 30)), { pose: 'hello', line: null });
+  eq(save('LL--', quick('2026-11-05', 900, 170)), { pose: 'strong1', line: 'Protein goal met.' });
+  // Whole grams, as Today's "Goal reached": 100 + 59.5 g meets 160 g, and today's 159.5 g counts in the run.
+  eq(save('PP', quick(today('PP'), 600, 59.5), second('PP')), { pose: 'strong2', line: 'Protein: 3 days in a row.' });
+});
+test('Pinto in the toast: "Welcome back." after 2 or more empty days; a forgotten meal can reach a milestone', () => {
+  const save = (pattern, meal, extra = []) => {
+    const s = scene(pattern), before = [...s.meals, ...extra];
+    return L.mealPinto({ ...s, before, after: [...before, meal], today: dayAfter(pattern), day: meal.day });
+  };
+  eq(save('LL--', quick('2026-11-05', 400, 30)), { pose: 'hello', line: 'Welcome back.' });
+  eq(save('LLL-', quick('2026-11-05', 400, 30)), { pose: 'hello', line: null });
+  eq(save('-', quick('2026-11-02', 400, 30)), { pose: 'hello', line: null });   // 31 Oct is before the first day
+  // 6 Nov forgotten, added on 7 Nov when today already has a meal: 5 + 1 + 1 = 7 days in a row.
+  eq(save('LLLLL-', quick('2026-11-06', 700, 40, '19:00'), [quick('2026-11-07', 400, 30, '08:00')]), { pose: 'proud', line: 'One week in a row!' });
+  // A meal added to an older day is late: it changes no streak, and only today's meals bring Pinto otherwise.
+  const late = { ...quick('2026-11-04', 700, 40, '19:00'), createdAt: '2026-11-07T09:00:00' };
+  eq(save('LLL-LL', late, [quick('2026-11-07', 400, 30, '08:00')]), null);
+});
+test('Pinto peeks on about 1 day in 4, picked from the date: never 3 days running, never a week without', () => {
+  const p = [];
+  for (let d = '2026-01-01'; d < '2046-01-01'; d = L.addDays(d, 1)) p.push(L.peekDay(d));
+  const n = p.filter(Boolean).length, marks = p.map(x => (x ? 'x' : '.')).join('');
+  ok(n / p.length > 0.24 && n / p.length < 0.26, `${n} of ${p.length}`);
+  ok(p.filter(x => x === 'today').length > n * 0.45 && p.filter(x => x === 'progress').length > n * 0.45, 'both screens');
+  ok(!marks.includes('xxx') && !marks.includes('.......'), 'spacing');
+});
+test('Pinto markup: known poses only, the marks image where there is one, the class "strong" for the biceps', () => {
+  eq(String(pinto('nope')), '');
+  const s = String(pinto('strong2', true));
+  ok(s.startsWith('<span class="pinto strong play" aria-hidden="true">') && s.includes('src="art/pinto-strong2.webp"') && !s.includes('-fx'), s);
+  ok(String(pinto('think')).includes('pt-fx') && String(pinto('think')).includes('class="pt-dots"') && !String(pinto('think')).includes('play'));
+  eq([firstTime('test a'), firstTime('test a'), firstTime('test b')], [true, false, true]);
+});
+test('Sample: Pinto\'s morning lines over six weeks, each from data up to that morning', async () => {
+  const d = await loadSample();
+  const said = [], lines = {};
+  let saidOn;
+  for (let t = '2026-10-13'; t <= '2026-11-23'; t = L.addDays(t, 1)) {
+    const s = { meals: d.meals.filter(m => m.day < t), days: d.days.filter(x => x.day < t), goals: d.goals, firstDay: d.settings.firstDay };
+    const weights = d.weights.filter(w => w.day < t), y = L.morning({ ...s, weights, today: t }).yesterday;
+    const pt = L.morningPinto({ ask: false, type: y.type, kcal: y.totals.kcal, count: y.totals.count, floor: 1500,
+      run: L.limitRun({ ...s, today: t, floor: 1500 }), news: L.trendNews(weights, t, saidOn) });
+    if (pt.trend) { saidOn = t; said.push(t); }
+    if (pt.line) lines[t.slice(5)] = pt.line;
+  }
+  eq(lines['10-15'], '3 days within your limit.');
+  eq(lines['10-19'], 'A week within your limit.');
+  eq(lines['11-18'], 'Trend down 0.3 kg this week.');
+  eq(said, ['2026-10-20', '2026-10-27', '2026-11-03', '2026-11-11', '2026-11-18']);   // never closer than 7 days
+  eq(Object.keys(lines).length, 10);
+});
+
 /* ---------- Check and save ---------- */
 
 test('Steppers: 10 g (5 below 50), 25 ml (10 below 100), 1 piece (1/2 below 2)', () => {
@@ -343,6 +500,16 @@ test('Portions stop at 5,000 g or ml and 50 pieces, like the steppers', () => {
 test('Release: VERSION is the same in js/config.js and sw.js, or the update never installs', async () => {
   const sw = await (await fetch('../sw.js', { cache: 'no-store' })).text();
   eq(sw.match(/const VERSION = '([^']+)'/)?.[1], VERSION);
+});
+test('Release: Pinto\'s 18 images are in the offline list and load', async () => {
+  const sw = await (await fetch('../sw.js', { cache: 'no-store' })).text();
+  const art = [...sw.matchAll(/'(art\/pinto-[\w-]+\.webp)'/g)].map(m => m[1]);
+  eq(art.length, 18);
+  ok(sw.indexOf("'art/") < sw.indexOf("'js/config.js'"), 'before js/config.js');
+  for (const f of art) {
+    const r = await fetch(`../${f}`, { cache: 'no-store' });
+    ok(r.ok !== false && (await r.text()).length > 100, f);
+  }
 });
 
 /* ---------- Backup and the sample data ---------- */

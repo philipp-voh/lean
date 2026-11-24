@@ -481,12 +481,86 @@ button.row:active, button.set:active, label.set:active, .act:active, .chip:activ
 /* Toast: one line above the dock, with Undo where it applies */
 .toast {
   position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-  width: min(560px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; min-height: 52px;
+  width: min(560px, calc(100% - 32px)); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; min-height: 52px;
   border-radius: 16px; background: var(--ink); color: var(--bg); z-index: 10; animation: fade 200ms var(--ease);
 }
 .toast p { flex: 1; }
-.toast-btn { min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; color: var(--accent-soft); font-weight: 600; cursor: pointer; }
+/* At the largest text sizes Undo wraps under the text, at the right, instead of running off the toast. */
+.toast-btn { margin-left: auto; min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; color: var(--accent-soft); font-weight: 600; cursor: pointer; }
 @keyframes fade { from { opacity: 0; } }
+
+/* Pinto, Lean's mascot (drafts/mascot/HANDOFF.md). Each pose is two stacked cut-outs: the figure
+   (art/pinto-<pose>.webp) and, where it has them, the marks around it (art/pinto-<pose>-fx.webp).
+   Pinto arrives, makes one gesture under a second, then stays still; the only loop is the thinking dots.
+   Keyframes leave out their end state, so with Reduce Motion each pose simply shows. Taps pass through it. */
+.pinto { position: relative; display: block; flex: none; pointer-events: none; }
+.pinto img, .pinto .pt-dots { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pinto .pt-dot { fill: #046b21; }   /* the bubble's dots, in the art's own dark green */
+.pinto .pt-fig { transform-origin: 50% 95%; }
+.pinto .pt-fx { transform-origin: 50% 50%; }
+.pinto.peek { overflow: hidden; }   /* the peek is cut off at the edge it comes in from */
+/* One Pinto at a time: while the toast shows Pinto, the one on the screen steps out. */
+body:has(> #toast:not([hidden]) > .pinto) #app .pinto { visibility: hidden; }
+
+/* Sizes, by place */
+.toast .pinto { width: 40px; height: 40px; }
+.est-line .pinto { width: 48px; height: 48px; }
+.empty .pinto { width: 56px; height: 56px; }
+.hero .pinto, .pt-greet .pinto { width: 64px; height: 64px; }
+/* The peek: at the screen's right edge, standing on its heading's line; the figure fills the square's right third. */
+h2:has(> .pinto.peek) { position: relative; }
+.pinto.peek { position: absolute; right: -20px; bottom: 0; width: 48px; height: 48px; }
+
+/* On the dark toast the dark-green marks would vanish, so they show pale there. */
+.toast .pinto:not(.think) .pt-fx { filter: brightness(0) invert(0.9); }
+
+/* The toast is Pinto's bubble: Pinto at its left edge, the toast's text, then a line on its own line in semibold. */
+.toast:has(> .pinto) { padding-left: 8px; }
+.toast b { display: block; font-weight: 600; }
+
+/* The morning row: Pinto right of "Good morning"; with larger text it wraps below the date, still at the right.
+   A news line is a speech bubble under it, its tail under the middle of the 64 px Pinto (half of 64, less half the tail). */
+.pt-greet { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pt-greet .pinto { margin-left: auto; }
+.pt-say { position: relative; align-self: flex-end; max-width: 85%; margin-top: 12px; padding: 10px 14px; border-radius: 16px; background: var(--fill); font-weight: 500; text-wrap: pretty; }
+.pt-say::before { content: ''; position: absolute; top: -6px; right: 25px; width: 14px; height: 14px; border-radius: 3px; background: inherit; transform: rotate(45deg); }
+
+/* 1. Arrive: a quick fade and rise, each time Pinto appears. */
+.pinto.play { animation: pt-in 250ms var(--ease); }
+/* 2. One gesture, chosen by the pose. hello sways; in the toast it hops. */
+.pinto.play .pt-fig { animation: pt-sway 650ms 150ms var(--ease); }
+.toast .pinto.play.hello .pt-fig, .pinto.play.lean .pt-fig, .pinto.play.proud .pt-fig { animation: pt-hop 450ms 120ms var(--ease); }
+.pinto.play.strong .pt-fig { animation: pt-flex 480ms 120ms var(--ease); }
+.pinto.play.big .pt-fig { animation: pt-puff 380ms 120ms var(--ease) both; }
+.pinto.play.rest .pt-fig { animation: pt-breathe 2400ms 200ms ease-in-out 2; }
+.pinto.play.nod .pt-fig { animation: pt-nod 650ms 120ms var(--ease); }
+.pinto.play.peek .pt-fig { animation: pt-peek 600ms var(--ease) both; }
+/* 3. The marks follow the gesture. */
+.pinto.play.hello .pt-fx, .pinto.play.big .pt-fx, .pinto.play.nod .pt-fx { animation: pt-fade 300ms 350ms both; }
+.pinto.play.lean .pt-fx, .pinto.play.proud .pt-fx { animation: pt-pop 420ms 300ms var(--ease) both; }
+/* The one loop: while an estimate runs, the dots appear one by one and clear. With Reduce Motion all three stay. */
+.pinto.think .pt-dot-1 { animation: pt-dot-1 1800ms infinite; }
+.pinto.think .pt-dot-2 { animation: pt-dot-2 1800ms infinite; }
+.pinto.think .pt-dot-3 { animation: pt-dot-3 1800ms infinite; }
+
+@keyframes pt-in { from { opacity: 0; transform: translateY(6%); } }
+@keyframes pt-sway { 30% { transform: rotate(-4deg); } 65% { transform: rotate(2deg); } }
+@keyframes pt-hop { 35% { transform: translateY(-11%); } 70% { transform: translateY(0); } 85% { transform: translateY(-2%); } }
+@keyframes pt-flex { 40% { transform: scale(1.08); } 70% { transform: scale(0.98); } }
+@keyframes pt-puff { from { transform: scaleX(0.88); } 60% { transform: scaleX(1.03); } }
+@keyframes pt-breathe { 50% { transform: scaleY(1.03); } }
+@keyframes pt-nod { 30% { transform: rotate(6deg); } 65% { transform: rotate(-2deg); } }
+@keyframes pt-peek { from { transform: translateX(24%); } }
+@keyframes pt-fade { from { opacity: 0; } }
+@keyframes pt-pop { from { opacity: 0; transform: scale(0.6); } 65% { opacity: 1; transform: scale(1.06); } }
+@keyframes pt-dot-1 { 0%, 8% { opacity: 0; } 16%, 80% { opacity: 1; } 90%, 100% { opacity: 0; } }
+@keyframes pt-dot-2 { 0%, 28% { opacity: 0; } 36%, 80% { opacity: 1; } 90%, 100% { opacity: 0; } }
+@keyframes pt-dot-3 { 0%, 48% { opacity: 0; } 56%, 80% { opacity: 1; } 90%, 100% { opacity: 0; } }
+
+/* The Pinto switch in Settings: Safari's native switch, in Lean's green, in a group without a heading,
+   so its row needs no line of its own above it (the group before ends with one). */
+.set input[switch] { margin: 0; accent-color: var(--accent); }
+.group:not(:has(> h2)) > .set:first-child { border-top: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 1ms !important; animation: none !important; }

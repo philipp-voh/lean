@@ -4,9 +4,9 @@ import * as db from '../db.js';
 import { MAX, dayStr, itemTotals, localStamp, mealTotals, parseNum, portion, stepFor } from '../logic.js';
 import { usedUp } from '../ai.js';
 import { thumb } from '../photos.js';
-import { close, fmt, html, icon, sheet, toast } from '../ui.js';
+import { close, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
 import { dayRoute, gone, hhmm, spinner } from './add.js';
-import { logAgainMeal } from './today.js';
+import { logAgainMeal, mealToast } from './today.js';
 
 const PORTIONS = [[0.5, '½', 'Half'], [0.75, '¾', 'Three quarters'], [1, 'All', 'All'], [1.5, '1½', 'One and a half'], [2, '2×', 'Double']];
 const UNIT = { g: 'g', ml: 'ml', piece: 'piece' };
@@ -76,7 +76,7 @@ function estimating(state, d) {
   <div class="screen">
     <h1 class="sr" tabindex="-1">Estimating</h1>
     ${d.photos.length ? photosOf(d) : html`<p class="quote">${d.text}</p>`}
-    <p class="est-line" role="status">${spinner}<span>Estimating<small>${slow ? 'Taking longer than usual' : 'Usually 5 to 10 seconds'}</small></span></p>
+    <p class="est-line" role="status">${pintoOn(state.settings) ? pinto('think') : spinner}<span>Estimating<small>${slow ? 'Taking longer than usual' : 'Usually 5 to 10 seconds'}</small></span></p>
     <div aria-hidden="true">
       <div class="sk-tot"><span class="skel sk-k"></span><span class="skel sk-p"></span></div>
       <span class="skel sk-m"></span>
@@ -269,14 +269,16 @@ function update(work) {
   document.querySelector('[data-out="setNote"]').hidden = work.kcalSet == null && work.proteinSet == null;
 }
 
+// A new meal (one from a draft) may bring Pinto into the toast; edits and moves never do.
 async function finish(ctx, meal, photo, draftId) {
+  const before = ctx.state.meals;
   await ctx.write(w => {
     w.put('meals', meal);
     if (photo) w.put('photos', photo);
     if (draftId) w.del('drafts', draftId);
   });
   ctx.go(dayRoute(meal.day, ctx.today()), { replace: true });
-  toast(meal.day === ctx.today() ? 'Saved to today.' : `Saved to ${fmt.dayShort(meal.day)}.`);
+  toast(meal.day === ctx.today() ? 'Saved to today.' : `Saved to ${fmt.dayShort(meal.day)}.`, draftId ? mealToast(ctx, before, meal.day) : {});
 }
 
 export const actions = {
@@ -467,8 +469,7 @@ export const actions = {
   logAgain(el, e, ctx) {
     const { factor, correction, ...copy } = saved;
     if (!copy.items.length && copy.kcalSet == null) { say('Add an item or type the calories.'); return; }
-    ctx.go('#/today', { replace: true });
-    return logAgainMeal(ctx, copy);
+    return logAgainMeal(ctx, copy, '#/today');
   },
 
   openMove() { moveError(''); sheet('move'); },

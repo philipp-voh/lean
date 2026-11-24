@@ -1,11 +1,17 @@
 // C1 Today, C4 a past day, S2 first day. Notices: update ready and the backup reminder; waiting meals are rows
-// (on Today also those of earlier days). The date opens the month calendar.
+// (on Today also those of earlier days). The date opens the month calendar. Pinto rests on an empty Today,
+// peeks in on rare days, and comes with the toast of a new meal.
 import * as db from '../db.js';
-import { addDays, addMonths, dayStr, dayTotals, daysBetween, goalOn, localStamp, logAgain, mealTotals, monthDays, proteinBehind, streak } from '../logic.js';
-import { close, fmt, html, icon, sheet, toast } from '../ui.js';
+import { addDays, addMonths, dayStr, dayTotals, daysBetween, goalOn, localStamp, logAgain, mealPinto, mealTotals, monthDays, proteinBehind, streak } from '../logic.js';
+import { close, firstTime, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
 import { addPhotos, dayRoute, hhmm, newDraft } from './add.js';
 import { backupNow } from './settings.js';
 import * as progress from './progress.js';
+
+// The peek on Today waits for a meal, so it never shows beside the resting Pinto of an empty day.
+export function enter(state, { day }, ctx) {
+  progress.peek(state, ctx, 'today', day === ctx.today() && state.meals.some(m => m.day === day));
+}
 
 /* ---------- Shared with the morning summary ---------- */
 
@@ -30,17 +36,27 @@ export function goalsBlock(totals, goal, past) {
   </div>`;
 }
 
-// One tap logs a meal again now; Undo for 5 seconds.
-export async function logAgainMeal(ctx, src) {
-  const now = ctx.now(), at = now.toISOString();
+// Pinto for the toast of a new meal, from the meals before the save and now (logic.js mealPinto); {} when off.
+export function mealToast(ctx, before, day) {
+  const s = ctx.state;
+  if (!pintoOn(s.settings)) return {};
+  const pt = mealPinto({ before, after: s.meals, days: s.days, goals: s.goals, firstDay: s.settings.firstDay, today: ctx.today(), day });
+  return pt ? { pinto: pt.pose, line: pt.line } : {};
+}
+
+// One tap logs a meal again now; Undo for 5 seconds. From a saved meal's screen, `route` is Today: Lean moves there
+// once the meal is saved, with the toast in the same step, as finish() does (so the return never starts the peek).
+export async function logAgainMeal(ctx, src, route) {
+  const now = ctx.now(), at = now.toISOString(), before = ctx.state.meals;
   const meal = { ...structuredClone(src), id: crypto.randomUUID(), day: ctx.today(), time: hhmm(now), kind: 'again', createdAt: localStamp(now), updatedAt: at };
   const photo = src.photoCount ? await db.get('photos', src.id).catch(() => null) : null;
   if (!photo) meal.photoCount = 0;
   await ctx.write(w => { w.put('meals', meal); if (photo) w.put('photos', { ...photo, mealId: meal.id }); });
-  ctx.refresh();
+  if (route) ctx.go(route, { replace: true }); else ctx.refresh();
   toast(`${meal.name || 'Meal'} logged.`, {
     action: 'Undo',
     onAction: () => ctx.write(w => { w.del('meals', meal.id); w.del('photos', meal.id); }).then(ctx.refresh),
+    ...mealToast(ctx, before, meal.day),
   });
 }
 
@@ -98,9 +114,9 @@ export function view(state, { day }) {
     ${goalsBlock(totals, goal, false)}
     ${subline(totals)}
     ${again(state, today, totals, goal)}
-    <section class="section" aria-labelledby="t-meals"><h2 id="t-meals">Meals</h2>
+    <section class="section" aria-labelledby="t-meals"><h2 id="t-meals">Meals${state.ui.peek === `today ${today}` ? pinto('peek', firstTime(`p ${today}`)) : ''}</h2>
       ${rows.length ? html`<ul class="rows">${rows}</ul>` : html`
-      <div class="empty"><span class="badge">${icon('meal')}</span><h2>No meals yet</h2><p>Take a photo below, upload one or describe the meal.</p></div>
+      <div class="empty">${pintoOn(settings) ? pinto('rest', firstTime(`e ${today}`)) : html`<span class="badge">${icon('meal')}</span>`}<h2>No meals yet</h2><p>Take a photo below, upload one or describe the meal.</p></div>
       ${day === first ? html`<div class="tip">${icon('info')}<p><b>Tip:</b> photograph the pack or the nutrition label too. Lean then reads the exact values instead of estimating.</p></div>` : ''}`}
     </section>
   </div>

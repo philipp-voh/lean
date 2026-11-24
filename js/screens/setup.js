@@ -1,7 +1,7 @@
 // Setup: S8 (Safari tab), A1 Welcome, A2 Connect Google AI, A3 Your goals with the pace slider.
 import { calcGoals, parseNum, trend } from '../logic.js';
 import { testKey, wholeKey } from '../ai.js';
-import { fmt, html, icon } from '../ui.js';
+import { firstTime, fmt, html, icon, pinto, pintoOn } from '../ui.js';
 import * as restore from './settings.js';
 
 let keyText = '';
@@ -31,12 +31,12 @@ const gate = () => html`
     </ol>
   </div>`;
 
-/* ---------- A1 Welcome ---------- */
+/* ---------- A1 Welcome: Pinto says hello in place of the leaf tile ---------- */
 
 const welcome = state => html`
   <div class="screen">
     <div class="hero">
-      <span class="mark">${icon('leaf')}</span>
+      ${pintoOn(state.settings) ? pinto('hello', firstTime('w')) : html`<span class="mark">${icon('leaf')}</span>`}
       <h1 class="wordmark" tabindex="-1">Lean</h1>
       <p class="promise">Take a photo of a meal. Get its calories and protein in a few seconds.</p>
     </div>

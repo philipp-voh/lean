@@ -1,4 +1,4 @@
-// Small view helpers: an escaping template tag, number and date formats, icons, toasts and sheets.
+// Small view helpers: an escaping template tag, number and date formats, icons, Pinto, toasts and sheets.
 
 class Html {
   constructor(text) { this.text = text; }
@@ -42,13 +42,42 @@ export const fmt = {
 
 export const icon = (name, cls = 'ic') => raw(`<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`);
 
+/* ---------- Pinto, Lean's mascot: decoration only, hidden from VoiceOver; its moves are in app.css ---------- */
+
+// The poses, true where a second image holds the marks around the figure (wave lines, sparkles, the thought bubble).
+const POSES = { hello: true, lean: true, rest: false, strong1: false, strong2: false, strong3: true, big: true, think: true, proud: true, nod: true, peek: false };
+const DOTS = raw('<svg class="pt-dots" viewBox="0 0 192 192" aria-hidden="true"><circle class="pt-dot pt-dot-1" cx="136.0" cy="48.7" r="2.9"/><circle class="pt-dot pt-dot-2" cx="145.2" cy="48.7" r="2.9"/><circle class="pt-dot pt-dot-3" cx="154.2" cy="48.7" r="2.9"/></svg>');
+
+// On unless the Pinto switch in Settings is off.
+export const pintoOn = settings => settings.pinto !== false;
+
+// One pose; `play` adds the arrival and the pose's gesture. An unknown pose draws nothing.
+export function pinto(pose, play = false) {
+  if (!Object.hasOwn(POSES, pose)) return '';
+  const cls = pose.startsWith('strong') ? 'strong' : pose;
+  return html`<span class="pinto ${cls}${play ? ' play' : ''}" aria-hidden="true"><img class="pt-fig" src="art/pinto-${pose}.webp" alt="">${
+    POSES[pose] ? html`<img class="pt-fx" src="art/pinto-${pose}-fx.webp" alt="">` : ''}${pose === 'think' ? DOTS : ''}</span>`;
+}
+
+// Pinto moves once per appearance: true only the first time a key (the place and the day) is asked,
+// so the redraws after it keep Pinto still.
+const seen = new Set();
+export const firstTime = key => !seen.has(key) && !!seen.add(key);
+
 let toastTimer;
-// One line at the bottom; an action such as Undo stays tappable for ms.
-export function toast(text, { action, onAction, ms = 5000 } = {}) {
+// One line at the bottom; an action such as Undo stays tappable for ms. With `pinto`, Pinto comes first and always
+// moves (the toast lives outside #app, so no redraw replays it), and a news `line` follows the text in semibold.
+export function toast(text, { pinto: pose, line, action, onAction, ms = 5000 } = {}) {
   const box = document.getElementById('toast');
   box.replaceChildren();
+  if (pose) box.insertAdjacentHTML('beforeend', String(pinto(pose, true)));
   const p = document.createElement('p');
   p.textContent = text;
+  if (line) {
+    const b = document.createElement('b');
+    b.textContent = line;
+    p.append(' ', b);
+  }
   box.append(p);
   if (action) {
     const b = document.createElement('button');

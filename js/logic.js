@@ -270,6 +270,88 @@ export function morning({ meals, days, goals, weights, firstDay, today }) {
   };
 }
 
+/* ---------- Pinto: which pose and which line (drafts/mascot/HANDOFF.md, sections 4 and 5) ---------- */
+
+// Days in a row up to `last` for which ok(type, totals, goal) holds; the first day is as far back as it looks.
+function inARow({ meals, days, goals, firstDay, last, ok }) {
+  const totals = byDay(meals), off = offDays(days);
+  let n = 0;
+  for (let d = last; firstDay && d >= firstDay; d = addDays(d, -1)) {
+    const t = totals.get(d), goal = goalOn(goals, d);
+    if (!ok(dayType(t, goal, off.has(d)), t, goal)) break;
+    n++;
+  }
+  return n;
+}
+
+// The protein run: days in a row up to today with protein at or over the goal, in whole grams as Today's
+// "Goal reached". A Missed day, a day under the goal or a day without one ends it.
+export const proteinRun = ({ meals, days, goals, firstDay, today }) => inARow({ meals, days, goals, firstDay, last: today,
+  ok: (type, t, goal) => type !== 'miss' && !!goal && Math.round(t.protein) >= goal.protein });
+
+// Days in a row up to yesterday within the limit (Lean or Steady) and none under the calorie floor.
+export const limitRun = ({ meals, days, goals, firstDay, today, floor }) => inARow({ meals, days, goals, firstDay, last: addDays(today, -1),
+  ok: (type, t) => (type === 'lean' || type === 'steady') && Math.round(t.kcal) >= floor });
+
+const MILESTONES = [365, 100, 30, 7];
+const MILESTONE_LINES = { 7: 'One week in a row!', 30: '30 days in a row!', 100: '100 days in a row!', 365: 'A whole year in a row!' };
+// The highest streak milestone a save reaches: at or above it after the save, below it before.
+export const milestone = (before, after) => MILESTONES.find(m => before < m && after >= m) ?? null;
+
+// Weight news for the morning: a new low of the trend (with an earlier weigh-in to beat, to 0.1 kg), else the trend
+// down 0.2 kg or more this week, as Progress's Week chart counts it (its first weigh-in to the last). Only with a
+// weigh-in in the last 7 days, and at most once every 7 days: `saidOn` is the day of the last such line, and that
+// same day keeps it on redraws.
+export function trendNews(weights, today, saidOn) {
+  if (saidOn && saidOn !== today && daysBetween(saidOn, today) < 7) return null;
+  const pts = trend(weights), last = pts.at(-1), from = addDays(today, -7);
+  if (!last || last.day < from) return null;
+  const r1 = n => Math.round(n * 10) / 10;
+  if (pts.length > 1 && r1(last.trend) < r1(Math.min(...pts.slice(0, -1).map(p => p.trend)))) return 'New low on your trend.';
+  const week = pts.filter(p => p.day >= from), down = week.length > 1 ? r1(week[0].trend - last.trend) : 0;
+  return down >= 0.2 ? `Trend down ${down.toFixed(1)} kg this week.` : null;
+}
+
+// Pinto beside "Good morning". While Lean asks about yesterday (S1) it sits still and says nothing: resting if
+// yesterday has nothing logged, else hello. Otherwise yesterday picks the pose: lean (a Lean day at or above the
+// calorie floor), hello (a Lean day under the floor, or Steady), big (Logged) or rest (Missed). A line only after a
+// Lean or Steady day at or above the floor: on day 3 or day 7 within the limit, else the weight news (`news`).
+// `trend` says the line is the weight news, which is then remembered.
+export function morningPinto({ ask, type, kcal, count, floor, run, news }) {
+  if (ask) return { pose: count ? 'hello' : 'rest', line: null, still: true, trend: false };
+  const fine = (type === 'lean' || type === 'steady') && Math.round(kcal) >= floor;
+  const pose = type === 'lean' && fine ? 'lean' : type === 'logged' ? 'big' : type === 'miss' ? 'rest' : 'hello';
+  const line = !fine ? null : run === 3 ? '3 days within your limit.' : run === 7 ? 'A week within your limit.' : news;
+  return { pose, line: line ?? null, still: false, trend: !!line && line === news };
+}
+
+// Pinto in the toast after a new meal is saved (first match wins): a streak milestone; today's protein reaching its
+// goal, the biceps sized by the protein run; today's first meal, with "Welcome back." after 2 or more days with
+// nothing logged. Else null. `before` and `after` are the meals around the save, `day` the saved meal's day.
+export function mealPinto({ before, after, days, goals, firstDay, today, day }) {
+  const run = meals => streak({ meals, days, goals, firstDay, today }).current;
+  const m = milestone(run(before), run(after));
+  if (m) return { pose: 'proud', line: MILESTONE_LINES[m] };
+  if (day !== today) return null;
+  const goal = goalOn(goals, today), protein = meals => Math.round(dayTotals(meals, today).protein);
+  if (goal && protein(before) < goal.protein && protein(after) >= goal.protein) {
+    const n = proteinRun({ meals: after, days, goals, firstDay, today });
+    return { pose: n >= 7 ? 'strong3' : n >= 3 ? 'strong2' : 'strong1', line: n >= 3 ? `Protein: ${n} days in a row.` : 'Protein goal met.' };
+  }
+  if (dayTotals(after, today).count !== 1) return null;
+  const empty = d => !!firstDay && d >= firstDay && !dayTotals(after, d).count;
+  return { pose: 'hello', line: empty(addDays(today, -1)) && empty(addDays(today, -2)) ? 'Welcome back.' : null };
+}
+
+// About 1 day in 4 Pinto peeks in, on Today or Progress, picked from the date (FNV-1a), so nothing is stored to
+// choose it. From 2026 to 2045 that is a quarter of the days, never more than 2 in a row and never 7 days without.
+export function peekDay(day) {
+  let h = 2166136261;
+  for (const c of day) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  h >>>= 0;
+  return h % 4 ? null : (h >>> 2) % 2 ? 'progress' : 'today';
+}
+
 /* ---------- Check and save ---------- */
 
 // The step from this amount upwards: finer below 50 g, 100 ml and 2 pieces.

@@ -1,5 +1,5 @@
 // Offline cache. Each release bumps VERSION here and in js/config.js; install checks both match.
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const CACHE = 'lean-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
@@ -7,6 +7,11 @@ const FILES = [
   'js/app.js', 'js/db.js', 'js/logic.js', 'js/ai.js', 'js/photos.js', 'js/ui.js', 'js/backup.js',
   'js/screens/setup.js', 'js/screens/summary.js', 'js/screens/today.js', 'js/screens/add.js',
   'js/screens/check.js', 'js/screens/progress.js', 'js/screens/settings.js',
+  'art/pinto-hello.webp', 'art/pinto-hello-fx.webp', 'art/pinto-lean.webp', 'art/pinto-lean-fx.webp',
+  'art/pinto-rest.webp', 'art/pinto-strong1.webp', 'art/pinto-strong2.webp', 'art/pinto-strong3.webp',
+  'art/pinto-strong3-fx.webp', 'art/pinto-big.webp', 'art/pinto-big-fx.webp', 'art/pinto-think.webp',
+  'art/pinto-think-fx.webp', 'art/pinto-proud.webp', 'art/pinto-proud-fx.webp', 'art/pinto-nod.webp',
+  'art/pinto-nod-fx.webp', 'art/pinto-peek.webp',
   'js/config.js',   // last: a release landing during the install changes the file that is checked
 ];
 

@@ -1,8 +1,21 @@
 // D1 Progress: the last 7 days with the streak, then one range (Week, 4 weeks, All) for the weight chart and the
 // calories and protein charts. S7 Log weight and the How Lean days work sheet. The day marks and the 7-day strip are
-// shared with Today, the calendar and the morning summary.
-import { addDays, dayStr, daysBetween, goalOn, lastDays, parseNum, proteinMin, rate, series, streak, trend, weekly } from '../logic.js';
-import { close, fmt, html, icon, sheet, toast } from '../ui.js';
+// shared with Today, the calendar and the morning summary. Pinto nods at a weigh-in and, on rare days, peeks in
+// here or on Today.
+import { addDays, dayStr, daysBetween, goalOn, lastDays, parseNum, peekDay, proteinMin, rate, series, streak, trend, weekly } from '../logic.js';
+import { close, firstTime, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
+
+// A rare peek (logic.js peekDay): the first plain open of its screen that day shows it for that visit, once a day
+// even after a restart. Never while a toast is up: the return from a save has Pinto in the toast already.
+// state.ui.peek holds the screen and the day, so a screen left open past midnight drops it at the next redraw.
+export function peek(state, ctx, screen, ready = true) {
+  const today = ctx.today(), s = state.settings;
+  const show = ready && pintoOn(s) && peekDay(today) === screen && s.peekShownFor !== today && document.getElementById('toast').hidden;
+  state.ui.peek = show ? `${screen} ${today}` : null;
+  if (show) ctx.save('settings', { name: 'peekShownFor', value: today }).catch(() => {});
+}
+
+export function enter(state, params, ctx) { peek(state, ctx, 'progress'); }
 
 /* ---------- Day marks: one look per day type on every screen ---------- */
 
@@ -141,7 +154,7 @@ export function view(state) {
     </section>
     <div class="seg pg-range" role="radiogroup" aria-label="Range for the charts">${Object.entries(RANGE).map(([k, [l]]) => html`
       <button role="radio" aria-checked="${k === range}" data-action="range" data-v="${k}">${l}</button>`)}</div>
-    <section class="pg-sec" aria-labelledby="p-w"><h2 class="pg-h" id="p-w">Weight, kg</h2>
+    <section class="pg-sec" aria-labelledby="p-w"><h2 class="pg-h" id="p-w">Weight, kg${state.ui.peek === `progress ${today}` ? pinto('peek', firstTime(`p ${today}`)) : ''}</h2>
       ${last ? html`
       <div class="pg-bigline"><span class="pg-big">${fmt.one(last.trend)}<span class="sr"> kg</span></span><span class="pg-unit">trend</span>
         ${r.perWeek != null ? html`<span class="pg-rate">${fmt.signed(r.perWeek)}<span class="sr"> kg</span> a week</span>` : ''}</div>
@@ -277,7 +290,7 @@ export const actions = {
     await ctx.save('weights', { day, kg: value, at: ctx.now().toISOString() });
     close('weight');
     ctx.refresh();
-    toast(`Weight saved: ${fmt.kg(value)}.`);
+    toast(`Weight saved: ${fmt.kg(value)}.`, pintoOn(ctx.state.settings) ? { pinto: 'nod' } : {});
   },
 
   async deleteWeight(el, e, ctx) {

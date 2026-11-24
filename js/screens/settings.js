@@ -1,10 +1,10 @@
-// E1 Settings: goals, Google key, backup and restore, About. Also the restore sheet Welcome uses.
+// E1 Settings: goals, Google key, backup and restore, the Pinto switch, About. Also the restore sheet Welcome uses.
 import { DEMO_KEY, VERSION } from '../config.js';
 import * as db from '../db.js';
 import * as backup from '../backup.js';
 import { testKey } from '../ai.js';
 import { dayStr } from '../logic.js';
-import { close, fmt, html, icon, sheet as open, toast } from '../ui.js';
+import { close, fmt, html, icon, pintoOn, sheet as open, toast } from '../ui.js';
 
 const LEAVES = "When you tap Estimate, Try again or Re-estimate, and for a meal that waited offline once you're back online, the meal's resized photos, without location data, and your hints and note go to Google's Gemini API. With storing off, Google doesn't save the request for later use. Like any Gemini API call, it may keep a log for a limited time to detect misuse. In the EEA, Switzerland and the UK, free use isn't used to improve Google's products. Your key stays on this phone.";
 const HEALTH = 'Lean is a personal tracker, not medical advice. Photo estimates can be off by a third or more; your weight trend is the real check. Ask a doctor before cutting calories if you are pregnant or breastfeeding, have diabetes or kidney, heart or liver disease, take medicine such as insulin, or have had an eating disorder. If logging starts to feel stressful or controlling, take a break and talk to your doctor.';
@@ -50,6 +50,7 @@ export function view(state) {
         <input class="sr" type="file" accept=".json,application/json" data-change="restoreFile"></label>
       ${state.ui.snapshot ? html`<button class="set" data-action="restoreSnapshot"><span class="action">Restore from before the last update</span>${icon('right', 'chev')}</button>` : ''}
     </section>
+    <section class="group"><label class="set"><span>Pinto</span><input type="checkbox" switch data-change="pinto"${pintoOn(s) ? html` checked` : ''}></label></section>
     <section class="group" aria-labelledby="s-about"><h2 id="s-about">About</h2>
       <button class="set" data-action="info" data-sheet="leaves"><span>What leaves this phone</span>${icon('right', 'chev')}</button>
       <button class="set" data-action="info" data-sheet="health"><span>Before you start</span>${icon('right', 'chev')}</button>
@@ -112,6 +113,12 @@ export const actions = {
   recalc(el, e, ctx) { ctx.state.ui.goalsTyped = false; ctx.go('#/goals'); },
   changeKey(el, e, ctx) { ctx.state.ui.keyFrom = '#/settings'; ctx.go('#/key'); },
   info(el) { open(el.dataset.sheet); },
+
+  // Pinto on or off, everywhere. If the change can't be saved, the switch goes back (the save has said so).
+  async pinto(el, e, ctx) {
+    try { await ctx.save('settings', { name: 'pinto', value: el.checked }); }
+    catch { el.checked = !el.checked; }
+  },
 
   async testKey(el, e, ctx) {
     if (el.getAttribute('aria-disabled') === 'true') return;
