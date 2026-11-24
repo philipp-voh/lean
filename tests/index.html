@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Lean tests</title>
+<style>
+  body { font: 16px/1.45 system-ui, sans-serif; margin: 16px; color: #1d1d1f; background: #fff; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  #summary { font-weight: 600; }
+  li { margin: 2px 0; }
+  .fail { color: #b3261e; }
+  .fail pre { margin: 2px 0 8px; white-space: pre-wrap; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Lean tests</h1>
+<p id="summary" role="status">Running…</p>
+<ol id="results"></ol>
+<script type="module">
+  import logic from './logic.test.js';
+  import ai from './ai.test.js';
+
+  const list = document.getElementById('results');
+  const results = [];
+  for (const [group, tests] of [['logic', logic], ['ai', ai]]) {
+    for (const [name, fn] of tests) {
+      const li = document.createElement('li');
+      try {
+        await fn();
+        li.textContent = `PASS ${group}: ${name}`;
+        results.push({ name, ok: true });
+      } catch (e) {
+        li.className = 'fail';
+        li.textContent = `FAIL ${group}: ${name}`;
+        const pre = document.createElement('pre');
+        pre.textContent = e.stack || e.message;
+        li.append(pre);
+        results.push({ name, ok: false, error: e.message });
+      }
+      list.append(li);
+    }
+  }
+  const failed = results.filter(r => !r.ok).length;
+  const text = failed ? `FAIL: ${failed} of ${results.length} tests failed` : `PASS: all ${results.length} tests passed`;
+  document.getElementById('summary').textContent = text;
+  document.title = text;
+  window.testResults = results;   // read by headless runs
+</script>
+</body>
+</html>
