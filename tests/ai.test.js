@@ -59,6 +59,7 @@ test('Request: POST to Interactions, only two headers, key never in the URL, sto
   eq(Object.keys(init.headers).sort(), ['Content-Type', 'x-goog-api-key']);
   eq(init.headers['x-goog-api-key'], KEY);
   ok(!url.includes(KEY) && !('Api-Revision' in init.headers));
+  ok(url.endsWith('/v1beta/interactions'), url);   // v1 refuses text and image items in input
   eq([body.model, body.store, body.generation_config], [MAIN, false, { thinking_level: 'low' }]);
   for (const k of ['temperature', 'top_p', 'top_k', 'max_output_tokens']) ok(!JSON.stringify(body).includes(k), k);
   eq(body.response_format.mime_type, 'application/json');
@@ -183,11 +184,18 @@ test('Per-minute twice: the next model for this request only, no block', async (
   const e = await fails(estimate(TEXT, ctx(fake(minute))));
   eq([e.kind, e.message], ['busy', "Google's AI is busy."]);
 });
-test('Blocked: failed with safety or prohibited_content', async () => {
-  for (const code of ['safety', 'prohibited_content']) {
-    const f = fake({ status: 200, body: { status: 'failed', error: { code } } });
+test('Blocked: a 400 with safety, prohibited_content, jailbreak or blocklist, or failed with one -> no other model', async () => {
+  const msg = 'Request blocked due to safety violations (harmful content). Please modify your input and retry.';
+  const answers = [
+    ...['safety', 'prohibited_content', 'jailbreak', 'blocklist'].map(code => error(400, { code, message: msg }, false)),
+    { status: 200, body: { status: 'failed', errors: [{ code: 'safety', message: msg }] } },
+    { status: 200, body: { status: 'failed', errors: [{ code: 'https://generativelanguage.googleapis.com/errors/prohibited_content' }] } },
+    { status: 200, body: { status: 'failed', error: { code: 'safety' } } },
+  ];
+  for (const a of answers) {
+    const f = fake(a);
     const e = await fails(estimate(PHOTO, ctx(f)));
-    eq([e.kind, e.message, f.calls.length], ['blocked', "Google's AI won't estimate this. Type the numbers.", 1]);
+    eq([e.kind, e.message, f.calls.length], ['blocked', "Google's AI won't estimate this. Type the numbers.", 1], JSON.stringify(a.body));
   }
 });
 test('Busy: 500, 503, 504 retry once after 2 s, then the next model; then "Google\'s AI is busy."', async () => {

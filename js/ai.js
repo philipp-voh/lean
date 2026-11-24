@@ -57,6 +57,10 @@ const MESSAGES = {
 };
 
 const fail = (kind, extra) => Object.assign(new Error(MESSAGES[kind] ?? ''), { kind }, extra);
+// Google's codes for a blocked input or answer (its safety page). A normal call gets them as a 400; a failed
+// interaction lists them in `errors`. A code may come as a URI: its last part counts.
+const BLOCKED = ['safety', 'prohibited_content', 'jailbreak', 'blocklist'];
+const isBlocked = code => BLOCKED.includes(String(code ?? '').split('/').pop());
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pad = n => String(n).padStart(2, '0');
 const clock = iso => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -99,6 +103,7 @@ export const usedUp = (kind, quota, now) => CHAINS[kind === 'text' ? 'text' : 'p
 /* ---------- One call ---------- */
 
 function classify(status, err) {
+  if (isBlocked(err.code)) return fail('blocked');
   const text = JSON.stringify(err);
   if (status === 401 || (status === 400 && text.includes('API_KEY_INVALID'))) return fail('key');
   if (status === 403) {
@@ -139,7 +144,7 @@ async function send(model, body, ms, ctx) {
 
 function answer(data) {
   if (data?.status === 'failed') {   // checked before 'incomplete'
-    throw fail(['safety', 'prohibited_content'].includes(data.error?.code) ? 'blocked' : 'failed');
+    throw fail(isBlocked(data.errors?.[0]?.code ?? data.error?.code) ? 'blocked' : 'failed');
   }
   if (data?.status !== 'completed') throw fail('incomplete');
   const out = (data.steps ?? []).filter(s => s.type === 'model_output').at(-1);
