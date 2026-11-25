@@ -75,7 +75,7 @@ const chips = d => html`
     <button class="chip" aria-pressed="${d.hints.includes(h)}" data-action="hint" data-v="${h}">${icon('check', 'ic ck')}${h}</button>`)}</div>`;
 
 // Coming back from Check and save: the checked estimate stays one tap away.
-const toCheck = d => (d.result ? html`<button class="link" data-action="go" data-to="#/check/${d.id}" data-replace>${icon('left')}Back to the estimate</button>` : '');
+const toCheck = d => (d.result ? html`<button class="link" data-action="toEstimate">${icon('left')}Back to the estimate</button>` : '');
 
 const cameraInput = (action = 'addPhotos') => html`<input class="sr" type="file" accept="image/*" capture="environment" data-change="${action}">`;
 
@@ -115,11 +115,11 @@ function describe(state, d) {
   const today = dayStr(new Date());
   return html`
   <nav class="nav bar">
-    <button class="text-btn" data-action="discard">Cancel</button><span class="title">Describe a meal</span>
+    <button class="text-btn" data-action="discard">Cancel</button><span class="title">${d.reopened ? 'Change meal' : 'Describe a meal'}</span>
     <button class="btn primary sm" data-action="estimate">${unreadable(d) ? 'Try again' : 'Estimate'}</button>
   </nav>
   <div class="screen">
-    <h1 class="sr" tabindex="-1">Describe a meal</h1>
+    <h1 class="sr" tabindex="-1">${d.reopened ? 'Change meal' : 'Describe a meal'}</h1>
     ${toCheck(d)}
     ${unreadable(d) ? alert(d) : ''}
     <label class="field-label first" for="b4-text">What did you eat?</label>
@@ -140,6 +140,13 @@ function describe(state, d) {
 const say = text => { const el = document.querySelector('[data-out="why"]'); if (el) el.textContent = text; };
 
 export const actions = {
+  // The checked estimate is still in the draft after an Estimate that didn't come back (failed, waiting, unreadable):
+  // the link brings it back, and stops that draft's own retry, as the tap asks.
+  async toEstimate(el, e, ctx) {
+    const d = draftOf(ctx.state);
+    if (d.status !== 'ready') { Object.assign(d, { status: 'ready', error: null }); await ctx.save('drafts', d); }
+    ctx.go(`#/check/${d.id}`, { replace: true });
+  },
   async addPhotos(el, e, ctx) { await addPhotos(ctx, draftOf(ctx.state), filesOf(el)); },
 
   async retake(el, e, ctx) {

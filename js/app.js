@@ -252,6 +252,9 @@ function listen() {
     if (stale) redrawSoon();
   }, 50));
   root.addEventListener('close', () => { if (stale) redrawSoon(); }, true);   // a sheet closed: catch up
+  // Focus rings follow the keyboard: a Tab shows them, a touch hides them again (app.css .kbd).
+  document.addEventListener('keydown', e => { if (e.key === 'Tab') document.documentElement.classList.add('kbd'); });
+  document.addEventListener('pointerdown', () => document.documentElement.classList.remove('kbd'), true);
   window.addEventListener('hashchange', onRoute);
   window.addEventListener('online', retryWaiting);
   document.addEventListener('visibilitychange', onVisibility);

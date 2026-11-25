@@ -539,9 +539,9 @@ export const actions = {
     });
   },
 
-  // The saved meal back on Check and save as a draft with the same id: its photos (for 7 days) or its description,
-  // its items as they are on screen, the correction and Re-estimate. Saving replaces the meal, keeping its creation
-  // time (so the day still counts as before); Cancel on its photos or text leaves the meal as it was.
+  // The saved meal back as a draft with the same id, opened on its photos (for 7 days) or its description; "Back to
+  // the estimate" leads to its items as they are on screen, the correction and Re-estimate. Saving replaces the meal,
+  // keeping its creation time (so the day still counts as before); Cancel on its photos or text leaves it as it was.
   async reopen(el, e, ctx) {
     const m = saved, today = ctx.today();
     const open = ctx.state.drafts.find(x => x.id === m.id);
@@ -557,6 +557,6 @@ export const actions = {
       error: null, createdAt: m.createdAt, photosUntil: m.photosUntil ?? null, reopened: true,
     };
     await ctx.save('drafts', d);
-    ctx.go(`#/check/${d.id}`, { replace: true });
+    ctx.go(backTo(d), { replace: true });
   },
 };

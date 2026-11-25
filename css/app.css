@@ -33,11 +33,15 @@ body {
 p, h1, h2, h3, figure { margin: 0; }
 button, input, textarea { font: inherit; color: inherit; }
 input, textarea { font-size: max(16px, 1rem); }   /* under 16 px iOS zooms in */
-h1:focus { outline: none; }
+h1:focus, .sheet h2:focus, .sheet .sheet-text:focus { outline: none; }   /* focused by script, for VoiceOver */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root { caret-color: var(--accent); }
 ::selection { background: var(--accent-soft); }
 label:has(> input.sr:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* iOS also draws the ring after script focus, so a tap could leave a green box around a button (a sheet's first
+   button, the pencil after Done, a control focused again after a redraw). Rings on buttons, links and labels show
+   only while a keyboard is in use (app.js adds .kbd on Tab, removes it on a touch); fields keep theirs while edited. */
+:root:not(.kbd) :is(button, a, label, [tabindex]):focus-visible, :root:not(.kbd) label:has(> input.sr:focus-visible) { outline: none; }
 [hidden] { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
@@ -493,7 +497,9 @@ button.row:active, button.set:active, label.set:active, .act:active, .chip:activ
   position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   width: min(560px, calc(100% - 32px)); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; min-height: 52px;
   border-radius: 16px; background: var(--ink); color: var(--bg); z-index: 10; animation: fade 200ms var(--ease);
+  touch-action: none; -webkit-user-select: none; user-select: none; transition: transform 200ms var(--ease), opacity 200ms var(--ease);
 }
+.toast.dragging { transition: none; }   /* follows the finger; ui.js swipeable() */
 .toast p { flex: 1; }
 /* At the largest text sizes Undo wraps under the text, at the right, instead of running off the toast. */
 .toast-btn { margin-left: auto; min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: transparent; color: var(--accent-soft); font-weight: 600; cursor: pointer; }

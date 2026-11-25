@@ -88,12 +88,58 @@ export function toast(text, { pinto: pose, line, action, onAction, ms = 5000 } =
     box.append(b);
   }
   box.dataset.at = location.hash;
+  swipeable(box);
   box.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { box.hidden = true; }, ms);
 }
 
-// Before a delete that matters: an iPhone-style sheet with the action in red and Cancel, which has the focus.
+// A toast swipes away, down or to either side, like a notification, and its Undo goes with it. The drag starts only
+// after the finger moves 8 px, so a tap on Undo still works. VoiceOver keeps its own swipes: there the toast times out.
+let drag = null;
+function swipeable(box) {
+  if (box.dataset.swipe) return;
+  box.dataset.swipe = '1';
+  box.addEventListener('pointerdown', e => { if (e.isPrimary) drag = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, on: false, dx: 0, dy: 0 }; });
+  box.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = Math.max(0, e.clientY - drag.y);
+    if (!drag.on) {
+      if (Math.hypot(dx, e.clientY - drag.y) < 8) return;
+      drag.on = true;
+      drag.t = e.timeStamp;   // a flick is timed from when the toast starts to move
+      box.setPointerCapture(e.pointerId);
+      box.classList.add('dragging');
+    }
+    Object.assign(drag, { dx, dy });
+    box.style.transform = `translate(calc(-50% + ${dx}px), ${dy}px)`;   // the toast is centred with translateX(-50%)
+    box.style.opacity = String(Math.max(0.3, 1 - Math.max(Math.abs(dx), dy) / 240));
+  });
+  const end = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const { on, dx, dy, t } = drag;
+    drag = null;
+    if (!on) return;
+    box.classList.remove('dragging');
+    const far = Math.max(Math.abs(dx), dy), flick = far > 16 && far / Math.max(1, e.timeStamp - t) > 0.5;
+    if (e.type === 'pointerup' && (Math.abs(dx) > 64 || dy > 40 || flick)) { clearTimeout(toastTimer); box.hidden = true; }
+    box.style.transform = box.style.opacity = '';   // back to its place: at once if it went, sliding if it stays
+  };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+}
+
+// A sheet opens with the focus on its title, as iOS sheets do: VoiceOver starts there, and no focus ring lands on its
+// first button (Cancel or Close) after a tap.
+function focusTitle(d) {
+  const t = d.querySelector('h2, .sheet-text');
+  if (!t) return;
+  t.tabIndex = -1;
+  t.focus({ preventScroll: true });
+}
+
+// Before a delete that matters: an iPhone-style sheet with the action in red and Cancel; the question has the focus,
+// so nothing is confirmed by accident.
 // Resolves true only for the action. It lives outside #app, so no redraw touches it.
 export function ask(text, yes) {
   let d = document.getElementById('ask');
@@ -105,15 +151,21 @@ export function ask(text, yes) {
     document.body.append(d);
   }
   d.innerHTML = String(html`<div class="sheet-body"><p class="sheet-text" id="ask-t">${text}</p>
-    <button class="btn danger block" type="button" data-ask="yes">${yes}</button><button class="btn secondary block" type="button" data-ask="no" autofocus>Cancel</button></div>`);
+    <button class="btn danger block" type="button" data-ask="yes">${yes}</button><button class="btn secondary block" type="button" data-ask="no">Cancel</button></div>`);
   return new Promise(resolve => {
     let yesTapped = false;
     d.querySelector('[data-ask=yes]').addEventListener('click', () => { yesTapped = true; d.close(); });
     d.querySelector('[data-ask=no]').addEventListener('click', () => d.close());
     d.addEventListener('close', () => resolve(yesTapped), { once: true });
     d.showModal();
+    focusTitle(d);
   });
 }
 
-export const sheet = id => document.getElementById(id)?.showModal();
+export function sheet(id) {
+  const d = document.getElementById(id);
+  if (!d) return;
+  d.showModal();
+  focusTitle(d);
+}
 export const close = id => document.getElementById(id)?.close();

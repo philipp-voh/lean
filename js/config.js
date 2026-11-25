@@ -1,5 +1,5 @@
 // Each release bumps VERSION here and in sw.js: the service worker checks that both match.
-export const VERSION = '1.3.0';
+export const VERSION = '1.3.1';
 export const DB_VERSION = 1;
 
 // Photos go to the model with the bigger free daily limit, typed meals to the lighter one; each falls back to the other.
