@@ -25,7 +25,8 @@ function read(state, today) {
   const m = morning({ meals: state.meals, days: state.days, goals: state.goals, weights: state.weights, firstDay: s.firstDay, today });
   const y = m.yesterday, rec = state.days.find(d => d.day === y.day);
   // A meal of yesterday still waiting for its estimate or a check is not a forgotten one: Today lists it.
-  const pending = state.drafts.some(d => d.day === y.day && d.status !== 'editing');
+  // A reopened meal is already in the totals.
+  const pending = state.drafts.some(d => d.day === y.day && d.status !== 'editing' && !d.reopened);
   const ask = y.incomplete && !y.asked && !rec?.mark && !pending;
   // The calorie floor, read from the profile as Progress does: Pinto never cheers a day under it.
   const floor = s.profile?.sex === 'female' ? 1200 : 1500;

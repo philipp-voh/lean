@@ -1,8 +1,8 @@
 // Lean's shell: state in memory, the router, the start sequence, waiting meals, updates and midnight.
 //
 // Screens export view(state, params), actions and, optionally, enter(state, params, ctx) for the moment a route opens.
-// Besides the contract's ctx, screens get ctx.saveSoon (typing: saved after 500 ms), ctx.estimate(draftId, previous)
-// and ctx.load() (re-reads everything after a restore).
+// Besides the contract's ctx, screens get ctx.saveSoon (typing: saved after 500 ms), ctx.estimate(draftId, previous),
+// ctx.load() (re-reads everything after a restore) and ctx.redrawSoon() (a redraw that waits for an open sheet or picker).
 import * as db from './db.js';
 import { dayStr } from './logic.js';
 import { estimate, usedUp } from './ai.js';
@@ -29,7 +29,11 @@ const state = {
 /* ---------- Saving: IndexedDB first, then memory, so "saved" is only shown once it is on disk ---------- */
 
 function apply(store, value, key) {
-  if (store === 'photos') return;
+  if (store === 'photos') {   // a meal's small photo was replaced or deleted: the copy on screen goes too
+    const id = value ? value.mealId : key, url = photoUrls.get(id);
+    if (url) { URL.revokeObjectURL(url); photoUrls.delete(id); }
+    return;
+  }
   if (store === 'settings') {
     if (value) state.settings[value.name] = value.value; else delete state.settings[key];
     return;
@@ -94,6 +98,7 @@ const ctx = {
     ops.forEach(op => op());
   },
   saveSoon,
+  redrawSoon,
   estimate: runEstimate,
   load,
 };
@@ -145,12 +150,13 @@ function onRoute() {
 }
 
 // Typing never redraws (iOS would drop the keyboard and dictation): a redraw then waits for the field to lose focus.
-let stale = false;
+let stale = false, picking = false;   // picking: a photo picker opened from #app is open
 const typing = () => document.activeElement?.matches('#app textarea, #app input:not([type=range], [type=file], [type=date], [type=time])');
 
-// Background news (an estimate came back, an update is ready) also waits while a sheet is open, so it stays open.
+// Background news (an estimate came back, an update is ready) also waits while a sheet, a photo picker or a date or
+// time picker is open, so it stays open and a chosen photo still arrives: the close, the choice or the blur catches up.
 function redrawSoon() {
-  if (document.querySelector('#app dialog[open]')) { stale = true; return; }
+  if (picking || document.querySelector('#app dialog[open]') || document.activeElement?.matches('#app input[type=date], #app input[type=time]')) { stale = true; return; }
   render();
 }
 
@@ -184,7 +190,7 @@ function render(force = false) {
 
 /* ---------- After each render: bar widths (no style attributes under the security policy) and photos ---------- */
 
-const photoUrls = new Map();   // meal id -> object URL, kept: a meal's photo never changes
+const photoUrls = new Map();   // meal id -> object URL, kept until that meal's small photo is written or deleted (apply)
 let draftUrls = [];
 
 function hydrate(root) {
@@ -232,11 +238,13 @@ function dispatch(attr, e) {
 function listen() {
   const root = document.getElementById('app');
   root.addEventListener('click', e => {
+    picking = e.target.matches('input[type=file]');   // a label's tap reaches its file input last; any other tap clears it
     if (e.target.tagName === 'DIALOG') { e.target.close(); return; }   // a tap on the dimmed backdrop
     dispatch('data-action', e);
   });
   root.addEventListener('input', e => dispatch('data-input', e));
-  root.addEventListener('change', e => dispatch('data-change', e));
+  root.addEventListener('change', e => { if (e.target.type === 'file') picking = false; dispatch('data-change', e); });
+  root.addEventListener('cancel', e => { if (e.target.type === 'file') { picking = false; if (stale) redrawSoon(); } }, true);   // the picker closed without a choice: catch up
   // iOS 26 leaves the page shifted after the keyboard closes.
   root.addEventListener('focusout', () => setTimeout(() => {
     if (typing()) return;
@@ -408,6 +416,15 @@ async function start() {
   // Meals left empty on an earlier day (the app was closed on Add) are only clutter.
   for (const d of state.drafts) {
     if (d.status === 'editing' && d.day < ctx.today() && !d.photos.length && !d.text.trim() && !d.note.trim()) ctx.remove('drafts', d.id).catch(() => {});
+  }
+  // A meal keeps its photos at full size for 7 days (check.js); after that only its small photo stays.
+  const expired = state.meals.filter(m => m.photosUntil && m.photosUntil < ctx.today());
+  if (expired.length) {
+    ctx.write(w => expired.forEach(m => {
+      const { photosUntil, ...rest } = m;
+      w.put('meals', rest);
+      w.del('photos', check.fullKey(m.id));
+    })).catch(() => {});
   }
   db.persist().catch(() => {});
   registerWorker();

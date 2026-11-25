@@ -1,10 +1,11 @@
 // B3 Check and save with S4 estimating, S5 free limit reached and the other messages, manual entry
-// ("Type the numbers"), and S6 a saved meal (Save, Log again, Move, Delete with Undo on Today).
+// ("Type the numbers"), and S6 a saved meal (Save, Log again, Move, Delete with Undo on Today, and for 7 days
+// after a photo meal, or any time for a described one, "Change ... or re-estimate", which reopens it as a draft).
 import * as db from '../db.js';
-import { MAX, dayStr, itemTotals, localStamp, mealTotals, parseNum, portion, stepFor } from '../logic.js';
+import { MAX, addDays, dayStr, itemTotals, localStamp, mealTotals, parseNum, portion, stepFor } from '../logic.js';
 import { usedUp } from '../ai.js';
 import { thumb } from '../photos.js';
-import { close, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
+import { ask, close, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
 import { dayRoute, gone, hhmm, spinner } from './add.js';
 import { logAgainMeal, mealToast } from './today.js';
 
@@ -28,6 +29,13 @@ export function enter(state, p) {
 
 const draftOf = state => state.drafts.find(d => d.id === params.id);
 
+// A photo meal keeps its photos at full size for 7 days, in the photos store under "<meal id>:full" as
+// {mealId, photos}, and the meal says until when (photosUntil); the small photo stays under the meal's id.
+export const fullKey = id => `${id}:full`;
+const KEEP_DAYS = 7;
+// A saved meal can be reopened while Lean has what the estimate needs: the photos, or the description.
+const reopenable = (m, today) => m.kind === 'text' || (m.kind === 'photo' && !!m.photosUntil && m.photosUntil >= today);
+
 // The AI's items carry totals for the amount; Lean keeps values per unit, so amounts can change.
 function fromResult(r) {
   const items = r.items.map(i => ({
@@ -42,8 +50,9 @@ function workOf(state) {
   if (params.mealId) return saved;
   const d = draftOf(state);
   if (!d) return null;
-  // A short description becomes the name, so what was typed before the free limit ran out isn't lost.
-  if (d.kind === 'quick') return (d.edits ??= { name: d.text.trim().length <= 60 ? d.text.trim() : '', kcal: '', protein: '', carbs: '', fat: '' });
+  // A short description becomes the name, so what was typed before the free limit ran out isn't lost; without one,
+  // the name of the last estimate (a reopened photo meal keeps its name).
+  if (d.kind === 'quick') return (d.edits ??= { name: (d.text.trim().length <= 60 && d.text.trim()) || (d.result?.dish ?? '').slice(0, 60), kcal: '', protein: '', carbs: '', fat: '' });
   return d.result ? (d.edits ??= fromResult(d.result)) : null;
 }
 
@@ -135,7 +144,7 @@ function itemRow(it, i) {
   const amt = `${fmt.amount(it.amount)} ${it.unit === 'piece' ? (it.amount === 1 ? 'piece' : 'pieces') : it.unit}`;
   return html`<li class="item">
     <div class="item-top"><button class="name item-name" data-action="openItem" data-index="${i}" aria-label="${it.name}, edit">${it.name}</button><span class="spacer"></span>
-      <span class="ik">${fmt.kcal(t.kcal)}<span class="sr"> kcal</span></span><span class="ip">${Math.round(t.protein)} g<span class="sr"> protein</span></span></div>
+      <span class="ik">${fmt.kcal(t.kcal)} kcal</span><span class="ip">${Math.round(t.protein)} g<span class="sr"> protein</span></span></div>
     <div class="item-bottom"><p class="src${it.source === 'label' ? ' label' : ''}">${src}</p>
       <div class="stepper"><button data-action="step" data-index="${i}" data-v="-1" aria-label="Less ${it.name}, ${amt}">${icon('minus')}</button>
         <span class="amt">${amt}</span>
@@ -191,6 +200,7 @@ function review(state, work, d) {
       <button class="btn secondary" data-action="reEstimate">${icon('refresh')}Re-estimate</button></div>
     <div class="kv"><label for="c-time">${day === today ? 'Time' : `${fmt.dayShort(day)}, time`}</label><input class="date-in" id="c-time" type="time" value="${time}" data-change="time"></div>` : html`
     <ul class="actions">
+      ${reopenable(meal, today) ? html`<li><button class="act" data-action="reopen">${icon('refresh')}${meal.kind === 'text' ? 'Change text or re-estimate' : 'Change photos or re-estimate'}</button></li>` : ''}
       <li><button class="act" data-action="logAgain">${icon('plus')}Log again</button></li>
       <li><button class="act" data-action="openMove">${icon('calendar')}Move to another day or time</button></li>
     </ul>
@@ -269,25 +279,39 @@ function update(work) {
   document.querySelector('[data-out="setNote"]').hidden = work.kcalSet == null && work.proteinSet == null;
 }
 
-// A new meal (one from a draft) may bring Pinto into the toast; edits and moves never do.
-async function finish(ctx, meal, photo, draftId) {
+// One transaction: the meal, its small photo, its full photos (or their removal) and the end of the draft.
+// A new meal (from a draft) may bring Pinto into the toast; edits, moves and a reopened meal never do.
+async function finish(ctx, meal, photo, draftId, { full = null, dropFull = false, dropPhoto = false, news = !!draftId } = {}) {
   const before = ctx.state.meals;
   await ctx.write(w => {
     w.put('meals', meal);
     if (photo) w.put('photos', photo);
+    if (dropPhoto) w.del('photos', meal.id);
+    if (full) w.put('photos', full);
+    else if (dropFull) w.del('photos', fullKey(meal.id));
     if (draftId) w.del('drafts', draftId);
   });
   ctx.go(dayRoute(meal.day, ctx.today()), { replace: true });
-  toast(meal.day === ctx.today() ? 'Saved to today.' : `Saved to ${fmt.dayShort(meal.day)}.`, draftId ? mealToast(ctx, before, meal.day) : {});
+  toast(meal.day === ctx.today() ? 'Saved to today.' : `Saved to ${fmt.dayShort(meal.day)}.`, news ? mealToast(ctx, before, meal.day) : {});
 }
 
 export const actions = {
+  // Done, or a tap elsewhere, closes the field again: the typed number stays, with its pencil. The 50 ms wait
+  // matches app.js's own focusout redraw, so a tap on another control lands first; a sheet or the time picker
+  // it opened stays open, and the field closes once that is done (ctx.redrawSoon). After Done nothing has focus:
+  // it goes to the pencil the field turned back into, so VoiceOver keeps its place.
   pencil(el, e, ctx) {
-    pencil = el.dataset.v;
+    const key = pencil = el.dataset.v;
     ctx.refresh();
-    const input = document.getElementById(`t-${pencil}`);
+    const input = document.getElementById(`t-${key}`);
     input.focus();
     input.select();
+    input.addEventListener('blur', () => setTimeout(() => {
+      if (pencil !== key || document.activeElement === input) return;
+      pencil = null;
+      ctx.redrawSoon();
+      if (document.activeElement === document.body) document.querySelector(`#app [data-action="pencil"][data-v="${key}"]`)?.focus({ preventScroll: true, focusVisible: false });
+    }, 50));
   },
 
   setTotal(el, e, ctx) {
@@ -362,12 +386,23 @@ export const actions = {
     ctx.refresh();
   },
 
+  // Undo for 5 seconds puts the item back where it was, at the portion shown then (½ meanwhile halves it too).
   async removeItem(el, e, ctx) {
-    workOf(ctx.state).items.splice(itemAt, 1);
+    const w0 = workOf(ctx.state), at = itemAt, f0 = w0.factor, [item] = w0.items.splice(at, 1);
     close('item');
     itemAt = null;
     await keep(ctx);
     ctx.refresh();
+    toast(`${item.name || 'Item'} removed.`, {
+      action: 'Undo',
+      onAction: async () => {
+        const work = workOf(ctx.state);
+        if (work !== w0) return;   // a new estimate came back meanwhile: the item isn't part of it
+        work.items.splice(Math.min(at, work.items.length), 0, ...portion([item], work.factor / f0));
+        await keep(ctx);
+        ctx.refresh();
+      },
+    });
   },
 
   correction(el, e, ctx) { workOf(ctx.state).correction = el.value; say(''); keepSoon(ctx); },
@@ -381,7 +416,8 @@ export const actions = {
 
   async reEstimate(el, e, ctx) {
     const work = workOf(ctx.state), d = draftOf(ctx.state);
-    if (!work.correction?.trim()) { say('Type what to correct first, such as it was oat milk.'); return; }
+    // The field closes first: an open typed total would otherwise redraw 50 ms later and wipe the hint.
+    if (!work.correction?.trim()) { pencil = null; ctx.refresh(); say('Type what to correct first, such as it was oat milk.'); return; }
     const items = work.items.map(i => ({ name: i.name, amount: i.amount, unit: i.unit, ...itemTotals(i) }));
     await keep(ctx);
     ctx.estimate(d.id, { correction: work.correction.trim(), items });
@@ -427,7 +463,7 @@ export const actions = {
 
   async save(el, e, ctx) {
     const work = workOf(ctx.state), d = draftOf(ctx.state);
-    if (!work.items.length && work.kcalSet == null) { say('Add an item or type the calories.'); return; }
+    if (!work.items.length && work.kcalSet == null) { pencil = null; ctx.refresh(); say('Add an item or type the calories.'); return; }
     const now = ctx.now().toISOString();
     const { factor, correction, ...fields } = work;
     if (!d) {
@@ -440,8 +476,11 @@ export const actions = {
       note: d.kind === 'text' ? d.text : d.note, assumptions: d.result?.assumptions ?? null,
       photoCount: d.photos.length, model: d.model ?? null, createdAt: d.createdAt ?? localStamp(ctx.now()), updatedAt: now,
     };
+    const keep = d.kind === 'photo' && d.photos.length > 0;
+    if (keep) meal.photosUntil = d.photosUntil ?? addDays(ctx.today(), KEEP_DAYS);   // a reopened meal keeps its first date
     const photo = d.photos.length ? { mealId: d.id, ...(await thumb(d.photos[0])) } : null;
-    await finish(ctx, meal, photo, d.id);
+    await finish(ctx, meal, photo, d.id, { full: keep ? { mealId: fullKey(d.id), photos: d.photos } : null,
+      dropFull: !!d.reopened, dropPhoto: !!d.reopened && !photo, news: !d.reopened });
   },
 
   async saveQuick(el, e, ctx) {
@@ -462,13 +501,13 @@ export const actions = {
       photoCount: d.photos.length, model: null, createdAt: d.createdAt ?? localStamp(ctx.now()), updatedAt: now,
     };
     const photo = d.photos.length ? { mealId: d.id, ...(await thumb(d.photos[0])) } : null;
-    await finish(ctx, meal, photo, d.id);
+    await finish(ctx, meal, photo, d.id, { dropFull: !!d.reopened, dropPhoto: !!d.reopened && !photo, news: !d.reopened });
   },
 
   // Logs what is on screen, edits included; the saved meal itself stays as it is.
   logAgain(el, e, ctx) {
     const { factor, correction, ...copy } = saved;
-    if (!copy.items.length && copy.kcalSet == null) { say('Add an item or type the calories.'); return; }
+    if (!copy.items.length && copy.kcalSet == null) { pencil = null; ctx.refresh(); say('Add an item or type the calories.'); return; }
     return logAgainMeal(ctx, copy, '#/today');
   },
 
@@ -486,14 +525,38 @@ export const actions = {
     await finish(ctx, { ...fields, day, time, updatedAt: ctx.now().toISOString() }, null, null);
   },
 
+  // Asks first, then Undo for 5 seconds on Today as before.
   async delete(el, e, ctx) {
     const meal = ctx.state.meals.find(m => m.id === params.mealId);
+    if (!meal || !(await ask(`Delete ${meal.name || 'this meal'} from ${fmt.dayShort(meal.day)}?`, 'Delete meal'))) return;
     const photo = meal.photoCount ? await db.get('photos', meal.id).catch(() => null) : null;
-    await ctx.write(w => { w.del('meals', meal.id); w.del('photos', meal.id); });
+    const full = meal.photosUntil ? await db.get('photos', fullKey(meal.id)).catch(() => null) : null;
+    await ctx.write(w => { w.del('meals', meal.id); w.del('photos', meal.id); w.del('photos', fullKey(meal.id)); });
     ctx.go(dayRoute(meal.day, ctx.today()), { replace: true });
     toast('Meal deleted.', {
       action: 'Undo',
-      onAction: () => ctx.write(w => { w.put('meals', meal); if (photo) w.put('photos', photo); }).then(ctx.refresh),
+      onAction: () => ctx.write(w => { w.put('meals', meal); if (photo) w.put('photos', photo); if (full) w.put('photos', full); }).then(ctx.refresh),
     });
+  },
+
+  // The saved meal back on Check and save as a draft with the same id: its photos (for 7 days) or its description,
+  // its items as they are on screen, the correction and Re-estimate. Saving replaces the meal, keeping its creation
+  // time (so the day still counts as before); Cancel on its photos or text leaves the meal as it was.
+  async reopen(el, e, ctx) {
+    const m = saved, today = ctx.today();
+    const open = ctx.state.drafts.find(x => x.id === m.id);
+    if (open) { ctx.go(open.status === 'editing' && open.kind !== 'quick' ? backTo(open) : `#/check/${m.id}`, { replace: true }); return; }
+    if (!reopenable(m, today)) return;
+    const rec = m.kind === 'photo' ? await db.get('photos', fullKey(m.id)).catch(() => null) : null;
+    if (m.kind === 'photo' && !rec?.photos?.length) { toast("This meal's photos are no longer kept."); return; }
+    const d = {
+      id: m.id, day: m.day, time: m.time, kind: m.kind, status: 'ready', photos: rec?.photos ?? [], hints: m.hints ?? [],
+      note: m.kind === 'text' ? '' : m.note ?? '', text: m.kind === 'text' ? m.note ?? '' : '', model: m.model ?? null,
+      result: { readable: true, problem: null, dish: m.name, assumptions: m.assumptions ?? null, items: [] },
+      edits: { name: m.name, items: structuredClone(m.items), factor: 1, kcalSet: m.kcalSet ?? null, proteinSet: m.proteinSet ?? null, correction: '' },
+      error: null, createdAt: m.createdAt, photosUntil: m.photosUntil ?? null, reopened: true,
+    };
+    await ctx.save('drafts', d);
+    ctx.go(`#/check/${d.id}`, { replace: true });
   },
 };

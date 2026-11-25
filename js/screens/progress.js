@@ -3,7 +3,7 @@
 // shared with Today, the calendar and the morning summary. Pinto nods at a weigh-in and, on rare days, peeks in
 // here or on Today.
 import { addDays, dayStr, daysBetween, goalOn, lastDays, parseNum, peekDay, proteinMin, rate, series, streak, trend, weekly } from '../logic.js';
-import { close, firstTime, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
+import { ask, close, firstTime, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
 
 // A rare peek (logic.js peekDay): the first plain open of its screen that day shows it for that visit, once a day
 // even after a restart. Never while a toast is up: the return from a save has Pinto in the toast already.
@@ -238,7 +238,7 @@ function leanSheet(state, st) {
       <div><p class="gl">Your best</p><p class="pg-big">${st.best}<small>days</small></p></div>
     </div>
     <ul class="rules">
-      <li>${mark('lean')}<p><b>Lean day:</b> ${g ? html`calories at or under ${fmt.kcal(g.kcal)} and at least <span class="p">${proteinMin(g)} g</span> protein, which is 90% of your goal`
+      <li>${mark('lean')}<p><b>Lean day:</b> ${g ? html`calories at or under ${fmt.kcal(g.kcal)} kcal and at least <span class="p">${proteinMin(g)} g</span> protein, which is 90% of your goal`
         : 'calories at or under your limit and protein at 90% of your goal or more'}.</p></li>
       <li>${mark('steady')}<p><b>Steady day:</b> within your limit, with less protein.</p></li>
       <li>${mark('logged')}<p><b>Logged day:</b> over your limit.</p></li>
@@ -293,9 +293,10 @@ export const actions = {
     toast(`Weight saved: ${fmt.kg(value)}.`, pintoOn(ctx.state.settings) ? { pinto: 'nod' } : {});
   },
 
+  // Asks first, then Undo for 5 seconds as before.
   async deleteWeight(el, e, ctx) {
     const day = $('#w-date').value, rec = ctx.state.weights.find(w => w.day === day);
-    if (!rec) return;
+    if (!rec || !(await ask(`Delete the weigh-in of ${fmt.dayShort(day)}, ${fmt.kg(rec.kg)}?`, 'Delete weigh-in'))) return;
     await ctx.remove('weights', day);
     close('weight');
     ctx.refresh();

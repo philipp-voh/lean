@@ -28,13 +28,14 @@ export async function addPhotos(ctx, draft, files) {
   const room = MAX - draft.photos.length;
   if (files.length > room) toast(!room ? 'Up to 4 photos per meal.' : `Up to 4 photos per meal: ${room === 1 ? 'the first one is added' : `the first ${room} are added`}.`);
   files = files.slice(0, room);
-  if (!files.length) return;
+  if (!files.length) { ctx.redrawSoon(); return; }   // full meanwhile (picked while the last ones were prepared): catch up
   ctx.state.ui.preparing = draft.id;
   ctx.refresh();
   for (const file of files) {
     try {
       const photo = await prepare(file);
       if (!ctx.state.drafts.includes(draft)) break;   // discarded meanwhile: don't bring it back
+      if (draft.photos.length >= MAX) { toast('Up to 4 photos per meal.'); break; }   // an Undo took the last place
       draft.photos.push(photo);
       await ctx.save('drafts', draft);
     } catch (e) {
@@ -42,7 +43,7 @@ export async function addPhotos(ctx, draft, files) {
     }
   }
   ctx.state.ui.preparing = null;
-  ctx.refresh();
+  ctx.redrawSoon();   // waits while the photo picker is open again
 }
 
 let params = {};
@@ -83,11 +84,11 @@ function photos(state, d) {
   const preparing = state.ui.preparing === d.id;
   return html`
   <nav class="nav bar">
-    <button class="text-btn" data-action="discard">Cancel</button><span class="title">New meal</span>
+    <button class="text-btn" data-action="discard">Cancel</button><span class="title">${d.reopened ? 'Change meal' : 'New meal'}</span>
     <button class="btn primary sm" data-action="estimate">${bad ? 'Try again' : 'Estimate'}</button>
   </nav>
   <div class="screen">
-    <h1 class="sr" tabindex="-1">New meal</h1>
+    <h1 class="sr" tabindex="-1">${d.reopened ? 'Change meal' : 'New meal'}</h1>
     ${toCheck(d)}
     ${bad ? '' : html`<p class="intro">Add the pack or nutrition label for exact values. The photo of the plate shows how much.</p>`}
     <div class="photos">
@@ -106,7 +107,7 @@ function photos(state, d) {
       placeholder="${bad ? 'Chicken curry, about 300 g' : '60 g granola, a splash of milk'}">
     ${bad ? chips(d) : ''}
     <p class="field-err" role="alert" data-out="why"></p>
-    <p class="fine push">When you tap ${bad ? 'Try again' : 'Estimate'}, these photos and your note go to Google's AI. Small copies stay on this phone.</p>
+    <p class="fine push">When you tap ${bad ? 'Try again' : 'Estimate'}, these photos and your note go to Google's AI. They stay on this phone for 7 days, then one small copy.</p>
   </div>`;
 }
 
@@ -159,11 +160,21 @@ export const actions = {
     await addPhotos(ctx, d, files);
   },
 
+  // Undo for 5 seconds puts the photo back where it was (it stays in memory until then).
   async removePhoto(el, e, ctx) {
-    const d = draftOf(ctx.state);
-    d.photos.splice(+el.dataset.index, 1);
+    const d = draftOf(ctx.state), at = +el.dataset.index, [photo] = d.photos.splice(at, 1);
     await ctx.save('drafts', d);
     ctx.refresh();
+    toast('Photo removed.', {
+      action: 'Undo',
+      onAction: async () => {
+        const now = draftOf(ctx.state);
+        if (!now || now.photos.length >= 4) return;
+        now.photos.splice(Math.min(at, now.photos.length), 0, photo);
+        await ctx.save('drafts', now);
+        ctx.refresh();
+      },
+    });
   },
 
   hint(el, e, ctx) {
@@ -194,9 +205,10 @@ export const actions = {
     const back = dayRoute(d.day, ctx.today()), mode = params.mode;
     await ctx.remove('drafts', d.id);
     ctx.go(back, { replace: true });
-    // Undo instead of asking first: the draft is still in memory, so it can be saved again.
+    // Undo instead of asking first: the draft is still in memory, so it can be saved again. A reopened meal
+    // stays as it was saved: only the changes go.
     if (d.photos.length || d.text.trim() || d.note.trim()) {
-      toast('Meal discarded.', {
+      toast(d.reopened ? 'Changes discarded.' : 'Meal discarded.', {
         action: 'Undo',
         onAction: () => ctx.save('drafts', d).then(() => ctx.go(`#/${mode === 'text' ? 'describe' : 'add'}/${d.id}`)).catch(() => {}),
       });

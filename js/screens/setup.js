@@ -82,12 +82,13 @@ function key(state) {
   </div>`;
 }
 
+// ok: true shows the checkmark, false the alert, null neither (while the test runs).
 function keyStatus(text, ok, link) {
   const box = document.querySelector('[data-key-status]');
   if (!box) return;
-  box.classList.toggle('bad', !ok);
+  box.classList.toggle('bad', ok === false);
   box.replaceChildren();
-  if (text) box.insertAdjacentHTML('beforeend', String(html`${ok ? icon('check') : icon('alert')}<span>${text}</span>`));
+  if (text) box.insertAdjacentHTML('beforeend', String(html`${ok === true ? icon('check') : ok === false ? icon('alert') : ''}<span>${text}</span>`));
   if (link) box.insertAdjacentHTML('beforeend', String(html` <a class="link" href="${link}" target="_blank" rel="noopener noreferrer">Open Google</a>`));
 }
 
@@ -178,7 +179,7 @@ function goals(state) {
     <p class="rw" data-out="typedNote">${c.typedNote}</p>
     <div class="after"><button class="link" data-action="mode" data-v="calc">${icon('refresh', 'ic sm')}Recalculate from my details</button></div>` : html`
     <div class="result" role="group" aria-label="Your daily goals">
-      <div><p class="gl">Calories a day</p><p class="rn" data-out="kcal">${c.kcal}</p><p class="rw" data-out="burn">${c.burn}</p></div>
+      <div><p class="gl">Calories a day</p><p class="rn"><span data-out="kcal">${c.kcal}</span><small>kcal</small></p><p class="rw" data-out="burn">${c.burn}</p></div>
       <div class="prot"><p class="gl">Protein a day</p><p class="rn"><span data-out="protein">${c.protein}</span><small>g</small></p><p class="rw">2.0 g per kg of body weight</p></div>
     </div>
     <ul class="notes" data-out="notes" aria-live="polite">${c.notes.map(n => html`<li>${n}</li>`)}</ul>
@@ -235,9 +236,13 @@ export const actions = {
     } catch { keyStatus('Lean can’t read the clipboard. Tap the field and paste.', false); }
   },
 
-  async testKey() {
-    keyStatus('Testing…', true);
+  // The checkmark comes only with Google's answer; a second tap while it runs does nothing.
+  async testKey(el) {
+    if (el.getAttribute('aria-disabled') === 'true') return;
+    el.setAttribute('aria-disabled', 'true');   // not disabled: that would drop keyboard and VoiceOver focus
+    keyStatus('Testing…', null);
     const r = await testKey(keyText);
+    el.removeAttribute('aria-disabled');
     keyStatus(r.message, r.ok, r.link);
   },
 

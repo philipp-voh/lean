@@ -93,5 +93,27 @@ export function toast(text, { pinto: pose, line, action, onAction, ms = 5000 } =
   toastTimer = setTimeout(() => { box.hidden = true; }, ms);
 }
 
+// Before a delete that matters: an iPhone-style sheet with the action in red and Cancel, which has the focus.
+// Resolves true only for the action. It lives outside #app, so no redraw touches it.
+export function ask(text, yes) {
+  let d = document.getElementById('ask');
+  if (!d) {
+    d = document.createElement('dialog');
+    Object.assign(d, { id: 'ask', className: 'sheet' });
+    d.setAttribute('aria-labelledby', 'ask-t');
+    d.addEventListener('click', e => { if (e.target === d) d.close(); });   // a tap on the dimmed backdrop
+    document.body.append(d);
+  }
+  d.innerHTML = String(html`<div class="sheet-body"><p class="sheet-text" id="ask-t">${text}</p>
+    <button class="btn danger block" type="button" data-ask="yes">${yes}</button><button class="btn secondary block" type="button" data-ask="no" autofocus>Cancel</button></div>`);
+  return new Promise(resolve => {
+    let yesTapped = false;
+    d.querySelector('[data-ask=yes]').addEventListener('click', () => { yesTapped = true; d.close(); });
+    d.querySelector('[data-ask=no]').addEventListener('click', () => d.close());
+    d.addEventListener('close', () => resolve(yesTapped), { once: true });
+    d.showModal();
+  });
+}
+
 export const sheet = id => document.getElementById(id)?.showModal();
 export const close = id => document.getElementById(id)?.close();

@@ -2,7 +2,7 @@
 // (on Today also those of earlier days). The date opens the month calendar. Pinto rests on an empty Today,
 // peeks in on rare days, and comes with the toast of a new meal.
 import * as db from '../db.js';
-import { addDays, addMonths, dayStr, dayTotals, daysBetween, goalOn, localStamp, logAgain, mealPinto, mealTotals, monthDays, proteinBehind, streak } from '../logic.js';
+import { addDays, addMonths, dayStr, dayTotals, daysBetween, goalOn, localStamp, logAgain, mealPinto, mealTotals, monthDays, streak } from '../logic.js';
 import { close, firstTime, fmt, html, icon, pinto, pintoOn, sheet, toast } from '../ui.js';
 import { addPhotos, dayRoute, hhmm, newDraft } from './add.js';
 import { backupNow } from './settings.js';
@@ -20,17 +20,17 @@ export function goalsBlock(totals, goal, past) {
   const k = Math.round(totals.kcal), p = Math.round(totals.protein);
   const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
   const cal = !goal ? '' : past
-    ? html`of ${fmt.kcal(goal.kcal)} · <b>${fmt.kcal(Math.abs(goal.kcal - k))}</b>&nbsp;${k <= goal.kcal ? 'under' : 'over'}`
-    : k <= goal.kcal ? html`<b>${fmt.kcal(goal.kcal - k)}</b>&nbsp;left` : html`<b>${fmt.kcal(k - goal.kcal)}</b>&nbsp;over`;
+    ? html`of ${fmt.kcal(goal.kcal)} kcal · <b>${fmt.kcal(Math.abs(goal.kcal - k))}</b>&nbsp;${k <= goal.kcal ? 'under' : 'over'}`
+    : k <= goal.kcal ? html`<b>${fmt.kcal(goal.kcal - k)} kcal</b> left` : html`<b>${fmt.kcal(k - goal.kcal)} kcal</b> over`;
   const prot = !goal ? '' : past
     ? html`of ${goal.protein}&nbsp;g · <b>${Math.floor(p * 100 / goal.protein)}%</b>`
     : p < goal.protein ? html`<b>${goal.protein - p}&nbsp;g</b> to go` : html`<b>Goal</b> reached`;
   return html`
   <div class="goals">
-    <div class="goal"><p class="gl">Calories</p><p class="gn">${fmt.kcal(k)}${goal && !past ? html`<small class="of">/ ${fmt.kcal(goal.kcal)}</small>` : ''}</p>
+    <div class="goal"><p class="gl">Calories</p><p class="gn">${fmt.kcal(k)}${goal && !past ? html`<small class="of">/&nbsp;${fmt.kcal(goal.kcal)} kcal</small>` : html`<small>kcal</small>`}</p>
       ${goal ? html`<div class="gbar" role="img" aria-label="${fmt.kcal(k)} of ${fmt.kcal(goal.kcal)} kcal"><span data-pct="${pct(k, goal.kcal)}"></span></div>` : ''}
       <p class="gs">${cal}</p></div>
-    <div class="goal prot"><p class="gl">Protein</p><p class="gn">${p}${goal && !past ? html`<small class="of">/ ${goal.protein}&nbsp;g</small>` : html`<small>g</small>`}</p>
+    <div class="goal prot"><p class="gl">Protein</p><p class="gn">${p}${goal && !past ? html`<small class="of">/&nbsp;${goal.protein}&nbsp;g</small>` : html`<small>g</small>`}</p>
       ${goal ? html`<div class="gbar" role="img" aria-label="${p} of ${goal.protein} g protein"><span data-pct="${pct(p, goal.protein)}"></span></div>` : ''}
       <p class="gs">${prot}</p></div>
   </div>`;
@@ -49,6 +49,7 @@ export function mealToast(ctx, before, day) {
 export async function logAgainMeal(ctx, src, route) {
   const now = ctx.now(), at = now.toISOString(), before = ctx.state.meals;
   const meal = { ...structuredClone(src), id: crypto.randomUUID(), day: ctx.today(), time: hhmm(now), kind: 'again', createdAt: localStamp(now), updatedAt: at };
+  delete meal.photosUntil;   // the copy gets the small photo only
   const photo = src.photoCount ? await db.get('photos', src.id).catch(() => null) : null;
   if (!photo) meal.photoCount = 0;
   await ctx.write(w => { w.put('meals', meal); if (photo) w.put('photos', { ...photo, mealId: meal.id }); });
@@ -62,7 +63,7 @@ export async function logAgainMeal(ctx, src, route) {
 
 /* ---------- Rows ---------- */
 
-const META = { photo: m => `${m.photoCount} ${m.photoCount === 1 ? 'photo' : 'photos'}`, text: () => 'Described', quick: () => 'Typed numbers', again: () => 'Logged again' };
+const META = { photo: m => (m.photoCount ? `${m.photoCount} ${m.photoCount === 1 ? 'photo' : 'photos'}` : 'No photos'), text: () => 'Described', quick: () => 'Typed numbers', again: () => 'Logged again' };
 
 const thumb = m => (m.photoCount ? html`<img class="thumb" data-photo="${m.id}" alt="">` : html`<span class="thumb blank">${icon(m.kind === 'text' ? 'text' : 'meal')}</span>`);
 
@@ -70,7 +71,7 @@ function mealRow(m) {
   const t = mealTotals(m);
   return html`<li><button class="row" data-action="go" data-to="#/meal/${m.id}">${thumb(m)}
     <span class="row-main"><span class="name">${m.name || 'Quick add'}</span><span class="meta">${m.time} · ${META[m.kind]?.(m) ?? ''}</span></span>
-    <span class="kcal">${fmt.kcal(t.kcal)}<span class="sr"> kcal</span><small>${Math.round(t.protein)} g<span class="sr"> protein</span></small></span></button></li>`;
+    <span class="kcal">${fmt.kcal(t.kcal)} kcal<small>${Math.round(t.protein)} g<span class="sr"> protein</span></small></span></button></li>`;
 }
 
 function draftRow(d, running, day) {
@@ -94,10 +95,13 @@ export function view(state, { day }) {
   const first = settings.firstDay;
   const goal = goalOn(goals, day), totals = dayTotals(meals, day);
   const st = streak({ meals, days, goals, firstDay: first, today });
-  const list = meals.filter(m => m.day === day);
   // Today also shows meals of earlier days that still wait for an estimate or a check, so none is forgotten.
   const drafts = state.drafts.filter(d => (d.day === day && (d.status !== 'editing' || d.photos.length || d.text.trim())) ||
     (!past && d.day < day && d.status !== 'editing'));
+  // A meal reopened for changes is listed as its draft (same id) until it is saved again or the changes are discarded;
+  // behind a draft that isn't listed (emptied and not estimated) the meal stays listed, so it can still be opened.
+  const shown = new Set(drafts.map(d => d.id));
+  const list = meals.filter(m => m.day === day && !shown.has(m.id));
   // One list in time order, drafts of earlier days first.
   const rows = [...drafts, ...list].sort((a, b) => (a.day + a.time < b.day + b.time ? -1 : 1))
     .map(x => ('status' in x ? draftRow(x, !!state.running[x.id], day) : mealRow(x)));
@@ -144,13 +148,13 @@ function subline(totals) {
     <button class="link" data-action="logWeight">Log weight${icon('right', 'ic sm')}</button></p>`;
 }
 
+// The chips come protein-rich first while protein is behind (logic.js logAgain), without a label saying so.
 function again(state, today, totals, goal) {
   const chips = logAgain({ meals: state.meals, now: new Date(), today, totalsToday: totals, goalToday: goal });
   if (!chips.length) return '';
-  const behind = proteinBehind(totals, goal);
-  return html`<section class="section" aria-labelledby="t-again"><h2 id="t-again">Log again${behind ? html` <span class="hint">protein first</span>` : ''}</h2>
+  return html`<section class="section" aria-labelledby="t-again"><h2 id="t-again">Log again</h2>
     <div class="chips scroll">${chips.map(c => html`<button class="chip" data-action="again" data-id="${c.meal.id}">${icon('plus')}${c.name}
-      <span class="k">${fmt.kcal(c.kcal)}<span class="sr"> kcal</span> · <span class="kp">${c.protein} g<span class="sr"> protein</span></span></span></button>`)}</div></section>`;
+      <span class="k">${fmt.kcal(c.kcal)} kcal · <span class="kp">${c.protein} g<span class="sr"> protein</span></span></span></button>`)}</div></section>`;
 }
 
 function pastDay(state, { day, today, goal, totals, st, rows, prev }) {
